@@ -20,7 +20,8 @@ var (
 )
 
 const (
-	ERROR_GEOCODING_POSTALCODE string = "error geocoding"
+	ERROR_GEOCODING_POSTALCODE string = "error geocoding postal code"
+	ERROR_GEOCODING_ADDRESS    string = "error geocoding address"
 	ERROR_NO_FILE              string = "%s doesn't exist"
 	ERROR_FILE_INACCESSIBLE    string = "%s inaccessible"
 	ERROR_CREATING_FILE        string = "creating file %s"

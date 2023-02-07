@@ -41,8 +41,9 @@ type LatLng struct {
 }
 
 type Point struct {
-	Latitude  float64 `json:"Latitude"`
-	Longitude float64 `json:"Longitude"`
+	Latitude         float64 `json:"latitude"`
+	Longitude        float64 `json:"longitude"`
+	FormattedAddress string  `json:"formatted_address"`
 }
 type Range struct {
 	Min float64

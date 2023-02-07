@@ -2,8 +2,11 @@ package geocode
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/comfforts/cloudstorage"
@@ -24,9 +27,11 @@ type testConfig struct {
 func TestGeocoder(t *testing.T) {
 	for scenario, fn := range map[string]func(
 		t *testing.T,
-		client GeoCoder,
+		client *geoCodeService,
 	){
-		"request gecoding succeeds": testGeocode,
+		"gecoding postal code succeeds":   testGeocodePostalcode,
+		"gecoding address succeeds":       testGeocodeAddress,
+		"cache compression test succeeds": testCompression,
 	} {
 		testCfg := getTestConfig()
 		t.Run(scenario, func(t *testing.T) {
@@ -47,7 +52,7 @@ func getTestConfig() testConfig {
 }
 
 func setupTest(t *testing.T, testCfg testConfig) (
-	client GeoCoder,
+	client *geoCodeService,
 	teardown func(),
 ) {
 	t.Helper()
@@ -76,7 +81,7 @@ func setupTest(t *testing.T, testCfg testConfig) (
 	}
 }
 
-func testGeocode(t *testing.T, client GeoCoder) {
+func testGeocodePostalcode(t *testing.T, client *geoCodeService) {
 	postalCode := "92612"
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -85,4 +90,74 @@ func testGeocode(t *testing.T, client GeoCoder) {
 	require.NoError(t, err)
 	require.Equal(t, "33.66", fmt.Sprintf("%0.2f", pt.Latitude))
 	require.Equal(t, "-117.83", fmt.Sprintf("%0.2f", pt.Longitude))
+}
+
+func testGeocodeAddress(t *testing.T, client *geoCodeService) {
+	address := AddressQuery{
+		Street:     "1600 Amphitheatre Pkwy",
+		City:       "Mountain View",
+		PostalCode: "94043",
+		State:      "CA",
+		Country:    "US",
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, err := client.GeocodeAddress(ctx, address)
+	require.NoError(t, err)
+
+	address = AddressQuery{
+		Street:     "1045 La Avenida St",
+		City:       "Mountain View",
+		PostalCode: "94043",
+		State:      "CA",
+		Country:    "US",
+	}
+	_, err = client.GeocodeAddress(ctx, address)
+	require.NoError(t, err)
+
+	address = AddressQuery{
+		Street:     "2001 Market St",
+		City:       "San Francisco",
+		PostalCode: "94114",
+		State:      "CA",
+		Country:    "US",
+	}
+	_, err = client.GeocodeAddress(ctx, address)
+	require.NoError(t, err)
+
+	address = AddressQuery{
+		Street:     "2 Maxwell Ct",
+		City:       "San Francisco",
+		PostalCode: "94103",
+		State:      "CA",
+		Country:    "US",
+	}
+	_, err = client.GeocodeAddress(ctx, address)
+	require.NoError(t, err)
+
+	address = AddressQuery{
+		PostalCode: "94952",
+		Country:    "US",
+	}
+	_, err = client.GeocodeAddress(ctx, address)
+	require.NoError(t, err)
+}
+
+func testCompression(t *testing.T, geo *geoCodeService) {
+	addr := AddressQuery{
+		Street:     "2 Maxwell Ct",
+		City:       "San Francisco",
+		PostalCode: "94103",
+		State:      "CA",
+		Country:    "US",
+	}
+	addrStr := strings.ToLower(geo.addressString(addr))
+	addrStr = url.QueryEscape(addrStr)
+	fmt.Println("address string: ", addrStr)
+	sEnc := base64.StdEncoding.EncodeToString([]byte(addrStr))
+	fmt.Printf("encoded address string: %s, len: %d\n", sEnc, len(sEnc))
+
+	sDec, _ := base64.StdEncoding.DecodeString(sEnc)
+	fmt.Printf("decoded address string: %s, len: %d\n", string(sDec), len(string(sDec)))
 }
