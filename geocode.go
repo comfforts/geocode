@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/comfforts/cache"
@@ -18,8 +20,17 @@ import (
 	"go.uber.org/zap"
 )
 
+type AddressQuery struct {
+	Street     string
+	City       string
+	PostalCode string
+	State      string
+	Country    string
+}
+
 type GeoCoder interface {
 	Geocode(ctx context.Context, postalCode, countryCode string) (*Point, error)
+	GeocodeAddress(ctx context.Context, addr AddressQuery) (*Point, error)
 }
 
 type GeoCodeServiceConfig struct {
@@ -54,7 +65,11 @@ var unmarshalLPoint cache.MarshalFn = func(p interface{}) (interface{}, error) {
 	return point, nil
 }
 
-func NewGeoCodeService(cfg GeoCodeServiceConfig, csc cloudstorage.CloudStorage, logger logger.AppLogger) (*geoCodeService, error) {
+func NewGeoCodeService(
+	cfg GeoCodeServiceConfig,
+	csc cloudstorage.CloudStorage,
+	logger logger.AppLogger,
+) (*geoCodeService, error) {
 	if cfg.GeocoderKey == "" || logger == nil {
 		return nil, errors.NewAppError(errors.ERROR_MISSING_REQUIRED)
 	}
@@ -98,24 +113,112 @@ func (g *geoCodeService) Geocode(ctx context.Context, postalCode, countryCode st
 		return nil, ErrNilContext
 	}
 
+	if countryCode == "" {
+		countryCode = "USA"
+	}
+
 	if g.config.Cached {
 		point, exp, err := g.getFromCache(postalCode)
 		if err == nil {
-			g.logger.Debug("returning cached value", zap.String("postalCode", postalCode), zap.Any("exp", exp))
+			g.logger.Debug("returning cached value", zap.String("key", postalCode), zap.Any("exp", exp))
 			return point, nil
 		} else {
-			g.logger.Error("geocoder cache get error", zap.Error(err), zap.String("postalCode", postalCode))
+			g.logger.Error("geocoder cache get error", zap.Error(err), zap.String("key", postalCode))
 		}
 	}
 
-	if countryCode == "" {
-		countryCode = "US"
+	reqURL := g.postalCodeURL(countryCode, postalCode)
+	pt, err := g.geocode(reqURL)
+	if err != nil {
+		return nil, err
 	}
 
-	url := g.postalCodeURL(countryCode, postalCode)
+	if g.config.Cached {
+		err = g.setInCache(postalCode, pt, 0)
+		if err != nil {
+			g.logger.Error("geocoder cache set error", zap.Error(err), zap.String("key", postalCode))
+		}
+	}
+
+	return pt, nil
+}
+
+func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) (*Point, error) {
+	if ctx == nil {
+		g.logger.Error("context is nil", zap.Error(ErrNilContext))
+		return nil, ErrNilContext
+	}
+
+	if addr.Country == "" {
+		addr.Country = "USA"
+	}
+
+	if g.config.Cached {
+		key := strings.ToLower(g.addressString(addr))
+		key = url.QueryEscape(key)
+		point, exp, err := g.getFromCache(key)
+		if err == nil {
+			g.logger.Debug(
+				"returning cached value",
+				zap.String("key", key),
+				zap.Any("exp", exp),
+			)
+			return point, nil
+		} else {
+			g.logger.Error(
+				"geocoder cache get error",
+				zap.Error(err),
+				zap.String("key", key),
+			)
+		}
+	}
+
+	reqURL := g.addressURL(addr)
+	pt, err := g.geocode(reqURL)
+	if err != nil {
+		reqURL = g.addressComponentURL(addr)
+		pt, err = g.geocode(reqURL)
+		if err != nil {
+			reqURL = g.postalCodeURL(addr.Country, addr.PostalCode)
+			pt, err = g.geocode(reqURL)
+			if err != nil {
+				g.logger.Error(
+					"geocoder request error",
+					zap.Error(err),
+					zap.String("country",
+						addr.Country),
+					zap.String("postal",
+						addr.PostalCode,
+					))
+				return nil, err
+			}
+		}
+	}
+
+	if g.config.Cached {
+		if g.addressString(addr) == pt.FormattedAddress {
+			key := strings.ToLower(pt.FormattedAddress)
+			key = url.QueryEscape(key)
+			err = g.setInCache(key, pt, 0)
+			if err != nil {
+				g.logger.Error("geocoder cache set error", zap.Error(err), zap.String("key", key))
+			}
+		} else {
+			key := url.QueryEscape(g.addressString(addr))
+			err = g.setInCache(key, pt, ThirtyDays)
+			if err != nil {
+				g.logger.Error("geocoder cache set error", zap.Error(err), zap.String("key", key))
+			}
+		}
+	}
+
+	return pt, nil
+}
+
+func (g *geoCodeService) geocode(url string) (*Point, error) {
 	r, err := http.Get(url)
 	if err != nil {
-		g.logger.Error("geocoder request error", zap.Error(err), zap.String("postalCode", postalCode))
+		g.logger.Error("geocoder request error", zap.Error(err))
 		return nil, err
 	}
 	defer r.Body.Close()
@@ -123,21 +226,17 @@ func (g *geoCodeService) Geocode(ctx context.Context, postalCode, countryCode st
 	var results GeocoderResults
 	err = json.NewDecoder(r.Body).Decode(&results)
 	if err != nil || &results == (*GeocoderResults)(nil) || len(results.Results) < 1 {
-		g.logger.Error(ERROR_GEOCODING_POSTALCODE, zap.Error(err), zap.String("postalCode", postalCode))
-		return nil, errors.NewAppError(ERROR_GEOCODING_POSTALCODE)
+		g.logger.Error(ERROR_GEOCODING_ADDRESS, zap.Error(err))
+		return nil, errors.NewAppError(ERROR_GEOCODING_ADDRESS)
 	}
+
 	lat, long := results.Results[0].Geometry.Location.Lat, results.Results[0].Geometry.Location.Lng
+	fmtAddr := results.Results[0].FormattedAddress
 
 	geoPoint := Point{
-		Latitude:  lat,
-		Longitude: long,
-	}
-
-	if g.config.Cached {
-		err = g.setInCache(postalCode, geoPoint)
-		if err != nil {
-			g.logger.Error("geocoder cache set error", zap.Error(err), zap.String("postalCode", postalCode))
-		}
+		Latitude:         lat,
+		Longitude:        long,
+		FormattedAddress: fmtAddr,
 	}
 
 	return &geoPoint, nil
@@ -159,27 +258,126 @@ func (g *geoCodeService) Clear() {
 }
 
 func (g *geoCodeService) postalCodeURL(countryCode, postalCode string) string {
-	return fmt.Sprintf("%s%s?components=country:%s|postal_code:%s&sensor=false&key=%s", g.config.Host, g.config.Path, countryCode, postalCode, g.config.GeocoderKey)
+	compStr := fmt.Sprintf("country:%s|postal_code:%s", countryCode, postalCode)
+	return fmt.Sprintf(
+		"%s%s?components=%s&sensor=false&key=%s",
+		g.config.Host,
+		g.config.Path,
+		compStr,
+		g.config.GeocoderKey,
+	)
 }
 
-func (g *geoCodeService) getFromCache(postalCode string) (*Point, time.Time, error) {
-	val, exp, err := g.cache.Get(postalCode)
+func (g *geoCodeService) addressURL(addr AddressQuery) string {
+	addrStr := url.QueryEscape(g.addressString(addr))
+	return fmt.Sprintf(
+		"%s%s?address=%s&sensor=false&key=%s",
+		g.config.Host,
+		g.config.Path,
+		addrStr,
+		g.config.GeocoderKey,
+	)
+}
+
+func (g *geoCodeService) addressComponentURL(address AddressQuery) string {
+	components := map[string]string{}
+	if address.Street != "" {
+		components["street_address"] = url.QueryEscape(address.Street)
+	}
+	if address.City != "" {
+		components["locality"] = url.QueryEscape(address.City)
+	}
+	if address.State != "" {
+		components["administrative_area_level_1"] = url.QueryEscape(address.State)
+	}
+	if address.PostalCode != "" {
+		components["postal_code"] = url.QueryEscape(address.PostalCode)
+	}
+	if address.Country != "" {
+		components["country"] = url.QueryEscape(address.Country)
+	}
+	compStr := ""
+	for k, v := range components {
+		if compStr == "" {
+			compStr = fmt.Sprintf("%s:%s", k, v)
+		} else {
+			compStr = fmt.Sprintf("%s|%s:%s", compStr, k, v)
+		}
+	}
+	return fmt.Sprintf(
+		"%s%s?components=%s&sensor=false&key=%s",
+		g.config.Host,
+		g.config.Path,
+		compStr,
+		g.config.GeocoderKey,
+	)
+}
+
+func (g *geoCodeService) addressString(address AddressQuery) string {
+	compStr := ""
+	if address.Street != "" {
+		compStr = address.Street
+	}
+	if address.City != "" {
+		if compStr == "" {
+			compStr = address.City
+		} else {
+			compStr = fmt.Sprintf("%s %s", compStr, address.City)
+		}
+	}
+	if address.State != "" {
+		if compStr == "" {
+			compStr = address.State
+		} else {
+			compStr = fmt.Sprintf("%s %s", compStr, address.State)
+		}
+	}
+	if address.PostalCode != "" {
+		if compStr == "" {
+			compStr = address.PostalCode
+		} else {
+			compStr = fmt.Sprintf("%s %s", compStr, address.PostalCode)
+		}
+	}
+	if address.Country != "" {
+		if compStr == "" {
+			compStr = address.Country
+		} else {
+			compStr = fmt.Sprintf("%s %s", compStr, address.Country)
+		}
+	}
+	return compStr
+}
+
+func (g *geoCodeService) getFromCache(key string) (*Point, time.Time, error) {
+	val, exp, err := g.cache.Get(key)
 	if err != nil {
-		g.logger.Error(cache.ERROR_GET_CACHE, zap.Error(err), zap.String("postalCode", postalCode))
+		g.logger.Error(cache.ERROR_GET_CACHE, zap.Error(err), zap.String("key", key))
 		return nil, exp, err
 	}
 	point, ok := val.(Point)
 	if !ok {
-		g.logger.Error("error getting cache point value", zap.Error(cache.ErrGetCache), zap.String("postalCode", postalCode))
+		g.logger.Error(
+			"error getting cache point value",
+			zap.Error(cache.ErrGetCache),
+			zap.String("key", key),
+		)
 		return nil, exp, cache.ErrGetCache
 	}
 	return &point, exp, nil
 }
 
-func (g *geoCodeService) setInCache(postalCode string, point Point) error {
-	err := g.cache.Set(postalCode, point, OneYear)
+func (g *geoCodeService) setInCache(
+	key string,
+	point *Point,
+	cacheFor time.Duration,
+) error {
+	if cacheFor == 0 {
+		cacheFor = OneYear
+	}
+	err := g.cache.Set(key, point, cacheFor)
 	if err != nil {
-		g.logger.Error(cache.ERROR_SET_CACHE, zap.Error(err), zap.String("postalCode", postalCode))
+		g.logger.Error(cache.ERROR_SET_CACHE, zap.Error(err), zap.String("key", key))
 		return err
 	}
 	return nil
@@ -210,7 +408,12 @@ func (g *geoCodeService) uploadCache() error {
 		}
 	}()
 
-	cfr, err := cloudstorage.NewCloudFileRequest(g.config.BucketName, filepath.Base(cacheFile), filepath.Dir(cacheFile), fmod)
+	cfr, err := cloudstorage.NewCloudFileRequest(
+		g.config.BucketName,
+		filepath.Base(cacheFile),
+		filepath.Dir(cacheFile),
+		fmod,
+	)
 	if err != nil {
 		g.logger.Error("error creating request", zap.Error(err), zap.String("filepath", cacheFile))
 		return err
@@ -221,7 +424,14 @@ func (g *geoCodeService) uploadCache() error {
 		g.logger.Error("error uploading file", zap.Error(err))
 		return err
 	}
-	g.logger.Info("uploaded file", zap.String("file", filepath.Base(cacheFile)), zap.String("path", filepath.Dir(cacheFile)), zap.Int64("bytes", n))
+	g.logger.Info(
+		"uploaded file",
+		zap.String("file",
+			filepath.Base(cacheFile)),
+		zap.String("path",
+			filepath.Dir(cacheFile)),
+		zap.Int64("bytes", n),
+	)
 	return nil
 }
 
@@ -235,7 +445,11 @@ func (g *geoCodeService) downloadCache() error {
 	fStats, err := fileStats(cacheFile)
 	if err == nil {
 		fmod := fStats.ModTime().Unix()
-		g.logger.Info("file mod time", zap.Int64("modtime", fmod), zap.String("filepath", cacheFile))
+		g.logger.Info(
+			"file mod time",
+			zap.Int64("modtime", fmod),
+			zap.String("filepath", cacheFile),
+		)
 	}
 
 	err = createDirectory(cacheFile)
@@ -251,22 +465,46 @@ func (g *geoCodeService) downloadCache() error {
 	}
 	defer func() {
 		if err := f.Close(); err != nil {
-			g.logger.Error("error closing file", zap.Error(err), zap.String("filepath", cacheFile))
+			g.logger.Error(
+				"error closing file",
+				zap.Error(err),
+				zap.String("filepath", cacheFile),
+			)
 		}
 	}()
 
-	cfr, err := cloudstorage.NewCloudFileRequest(g.config.BucketName, filepath.Base(cacheFile), filepath.Dir(cacheFile), fmod)
+	cfr, err := cloudstorage.NewCloudFileRequest(
+		g.config.BucketName,
+		filepath.Base(cacheFile),
+		filepath.Dir(cacheFile),
+		fmod,
+	)
 	if err != nil {
-		g.logger.Error("error creating request", zap.Error(err), zap.String("filepath", cacheFile))
+		g.logger.Error(
+			"error creating request",
+			zap.Error(err),
+			zap.String("filepath", cacheFile),
+		)
 		return err
 	}
 
 	n, err := g.cloudStorage.DownloadFile(ctx, f, cfr)
 	if err != nil {
-		g.logger.Error("error downloading file", zap.Error(err), zap.String("filepath", cacheFile))
+		g.logger.Error(
+			"error downloading file",
+			zap.Error(err),
+			zap.String("filepath", cacheFile),
+		)
 		return err
 	}
-	g.logger.Info("downloaded file", zap.String("file", filepath.Base(cacheFile)), zap.String("path", filepath.Dir(cacheFile)), zap.Int64("bytes", n))
+	g.logger.Info(
+		"downloaded file",
+		zap.String("file",
+			filepath.Base(cacheFile)),
+		zap.String("path",
+			filepath.Dir(cacheFile)),
+		zap.Int64("bytes", n),
+	)
 	return nil
 }
 
