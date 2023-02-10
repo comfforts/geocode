@@ -31,6 +31,7 @@ type AddressQuery struct {
 type GeoCoder interface {
 	Geocode(ctx context.Context, postalCode, countryCode string) (*Point, error)
 	GeocodeAddress(ctx context.Context, addr AddressQuery) (*Point, error)
+	Clear() error
 }
 
 type GeoCodeServiceConfig struct {
@@ -154,8 +155,7 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) 
 	}
 
 	if g.config.Cached {
-		key := strings.ToLower(g.addressString(addr))
-		key = url.QueryEscape(key)
+		key := buildAddressKey(g.addressString(addr))
 		point, exp, err := g.getFromCache(key)
 		if err == nil {
 			g.logger.Debug(
@@ -197,14 +197,13 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) 
 
 	if g.config.Cached {
 		if g.addressString(addr) == pt.FormattedAddress {
-			key := strings.ToLower(pt.FormattedAddress)
-			key = url.QueryEscape(key)
+			key := buildAddressKey(pt.FormattedAddress)
 			err = g.setInCache(key, pt, 0)
 			if err != nil {
 				g.logger.Error("geocoder cache set error", zap.Error(err), zap.String("key", key))
 			}
 		} else {
-			key := url.QueryEscape(g.addressString(addr))
+			key := buildAddressKey(g.addressString(addr))
 			err = g.setInCache(key, pt, ThirtyDays)
 			if err != nil {
 				g.logger.Error("geocoder cache set error", zap.Error(err), zap.String("key", key))
@@ -242,19 +241,22 @@ func (g *geoCodeService) geocode(url string) (*Point, error) {
 	return &geoPoint, nil
 }
 
-func (g *geoCodeService) Clear() {
+func (g *geoCodeService) Clear() error {
 	g.logger.Info("cleaning up geo code data structures")
 	if g.config.Cached && g.cache.Updated() {
 		err := g.cache.SaveFile()
 		if err != nil {
 			g.logger.Error("error saving geocoder cache", zap.Error(err))
+			return err
 		} else {
 			err = g.uploadCache()
 			if err != nil {
 				g.logger.Error("error uploading geocoder cache", zap.Error(err))
+				return err
 			}
 		}
 	}
+	return nil
 }
 
 func (g *geoCodeService) postalCodeURL(countryCode, postalCode string) string {
@@ -311,6 +313,12 @@ func (g *geoCodeService) addressComponentURL(address AddressQuery) string {
 		compStr,
 		g.config.GeocoderKey,
 	)
+}
+
+func buildAddressKey(keyStr string) string {
+	key := strings.ToLower(keyStr)
+	key = url.QueryEscape(key)
+	return key
 }
 
 func (g *geoCodeService) addressString(address AddressQuery) string {

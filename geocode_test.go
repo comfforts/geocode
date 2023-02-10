@@ -15,13 +15,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const TEST_DIR = "test-data"
-
 type testConfig struct {
-	dir         string
-	bucket      string
-	credsPath   string
-	geocoderKey string
+	dir    string
+	bucket string
+	path   string
+	key    string
 }
 
 func TestGeocoder(t *testing.T) {
@@ -43,11 +41,16 @@ func TestGeocoder(t *testing.T) {
 }
 
 func getTestConfig() testConfig {
+	dataDir := os.Getenv("DATA_DIR")
+	credsPath := os.Getenv("CREDS_PATH")
+	bktName := os.Getenv("BUCKET_NAME")
+	geocoderKey := os.Getenv("GEOCODER_KEY")
+
 	return testConfig{
-		dir:         fmt.Sprintf("%s/", TEST_DIR),
-		bucket:      "mustum-fustum",            // add a valid bucket name
-		credsPath:   "creds/mustum-fustum.json", // add valid creds and path
-		geocoderKey: "APIKEY%^$&*#APIKEY",       // add valid google geocode api key
+		dir:    dataDir,
+		bucket: bktName,
+		path:   credsPath,
+		key:    geocoderKey,
 	}
 }
 
@@ -57,27 +60,30 @@ func setupTest(t *testing.T, testCfg testConfig) (
 ) {
 	t.Helper()
 
-	appLogger := logger.NewTestAppLogger(TEST_DIR)
+	appLogger := logger.NewTestAppLogger(testCfg.dir)
 
 	cscCfg := cloudstorage.CloudStorageClientConfig{
-		CredsPath: testCfg.credsPath,
+		CredsPath: testCfg.path,
 	}
 	csc, err := cloudstorage.NewCloudStorageClient(cscCfg, appLogger)
 	require.NoError(t, err)
 
 	gscCfg := GeoCodeServiceConfig{
-		DataDir:     TEST_DIR,
+		DataDir:     testCfg.dir,
 		BucketName:  testCfg.bucket,
-		GeocoderKey: testCfg.geocoderKey,
+		Cached:      true,
+		GeocoderKey: testCfg.key,
 	}
 	gsc, err := NewGeoCodeService(gscCfg, csc, appLogger)
 	require.NoError(t, err)
 
 	return gsc, func() {
 		t.Log(" TestGeocoder ended")
-
-		err = os.RemoveAll(TEST_DIR)
+		err := gsc.Clear()
 		require.NoError(t, err)
+
+		// err = os.RemoveAll(testCfg.dir)
+		// require.NoError(t, err)
 	}
 }
 

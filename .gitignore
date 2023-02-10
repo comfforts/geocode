@@ -1,3 +1,13 @@
+go.sum
+
+vendor
+
 creds
 
+data
+test-data
+example/data
+example/logs
+
 .notes
+env
