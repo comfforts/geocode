@@ -31,7 +31,7 @@ type AddressQuery struct {
 type GeoCoder interface {
 	Geocode(ctx context.Context, postalCode, countryCode string) (*Point, error)
 	GeocodeAddress(ctx context.Context, addr AddressQuery) (*Point, error)
-	GeocodeLatLong(ctx context.Context, lat, long float64) (*Point, error)
+	GeocodeLatLong(ctx context.Context, lat, long float64, hint string) (*Point, error)
 	Clear() error
 }
 
@@ -106,6 +106,7 @@ func NewGeoCodeService(
 		}
 		gcSrv.cache = c
 	}
+
 	return &gcSrv, nil
 }
 
@@ -218,10 +219,20 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) 
 	return pt, nil
 }
 
-func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64) (*Point, error) {
+func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, hint string) (*Point, error) {
 	if ctx == nil {
 		g.logger.Error("context is nil", zap.Error(ErrNilContext))
 		return nil, ErrNilContext
+	}
+
+	if g.config.Cached && hint != "" {
+		point, exp, err := g.getFromCache(url.QueryEscape(hint))
+		if err == nil {
+			g.logger.Debug("returning cached value", zap.String("key", hint), zap.Any("exp", exp))
+			return point, nil
+		} else {
+			g.logger.Error("geocoder cache get error", zap.Error(err), zap.String("key", hint))
+		}
 	}
 
 	reqURL := g.latLngURL(lat, long)
@@ -230,7 +241,24 @@ func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64) 
 		return nil, err
 	}
 
-	pt := pts[0]
+	var pt *Point
+	for _, p := range pts {
+		if strings.Contains(p.FormattedAddress, hint) {
+			pt = p
+			break
+		}
+	}
+	if pt == nil {
+		pt = pts[0]
+	}
+
+	if g.config.Cached && hint != "" {
+		err = g.setInCache(url.QueryEscape(hint), pt, OneDay)
+		if err != nil {
+			g.logger.Error("geocoder cache set error", zap.Error(err), zap.String("key", hint))
+		}
+	}
+
 	return pt, nil
 }
 
