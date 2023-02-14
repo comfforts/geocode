@@ -31,6 +31,7 @@ type AddressQuery struct {
 type GeoCoder interface {
 	Geocode(ctx context.Context, postalCode, countryCode string) (*Point, error)
 	GeocodeAddress(ctx context.Context, addr AddressQuery) (*Point, error)
+	GeocodeLatLong(ctx context.Context, lat, long float64) (*Point, error)
 	Clear() error
 }
 
@@ -129,11 +130,12 @@ func (g *geoCodeService) Geocode(ctx context.Context, postalCode, countryCode st
 	}
 
 	reqURL := g.postalCodeURL(countryCode, postalCode)
-	pt, err := g.geocode(reqURL)
+	pts, err := g.geocode(reqURL)
 	if err != nil {
 		return nil, err
 	}
 
+	pt := pts[0]
 	if g.config.Cached {
 		err = g.setInCache(postalCode, pt, 0)
 		if err != nil {
@@ -174,13 +176,13 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) 
 	}
 
 	reqURL := g.addressURL(addr)
-	pt, err := g.geocode(reqURL)
+	pts, err := g.geocode(reqURL)
 	if err != nil {
 		reqURL = g.addressComponentURL(addr)
-		pt, err = g.geocode(reqURL)
+		pts, err = g.geocode(reqURL)
 		if err != nil {
 			reqURL = g.postalCodeURL(addr.Country, addr.PostalCode)
-			pt, err = g.geocode(reqURL)
+			pts, err = g.geocode(reqURL)
 			if err != nil {
 				g.logger.Error(
 					"geocoder request error",
@@ -194,6 +196,8 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) 
 			}
 		}
 	}
+
+	pt := pts[0]
 
 	if g.config.Cached {
 		if g.addressString(addr) == pt.FormattedAddress {
@@ -214,7 +218,23 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) 
 	return pt, nil
 }
 
-func (g *geoCodeService) geocode(url string) (*Point, error) {
+func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64) (*Point, error) {
+	if ctx == nil {
+		g.logger.Error("context is nil", zap.Error(ErrNilContext))
+		return nil, ErrNilContext
+	}
+
+	reqURL := g.latLngURL(lat, long)
+	pts, err := g.geocode(reqURL)
+	if err != nil {
+		return nil, err
+	}
+
+	pt := pts[0]
+	return pt, nil
+}
+
+func (g *geoCodeService) geocode(url string) ([]*Point, error) {
 	r, err := http.Get(url)
 	if err != nil {
 		g.logger.Error("geocoder request error", zap.Error(err))
@@ -229,16 +249,16 @@ func (g *geoCodeService) geocode(url string) (*Point, error) {
 		return nil, errors.NewAppError(ERROR_GEOCODING_ADDRESS)
 	}
 
-	lat, long := results.Results[0].Geometry.Location.Lat, results.Results[0].Geometry.Location.Lng
-	fmtAddr := results.Results[0].FormattedAddress
-
-	geoPoint := Point{
-		Latitude:         lat,
-		Longitude:        long,
-		FormattedAddress: fmtAddr,
+	pts := []*Point{}
+	for _, r := range results.Results {
+		pts = append(pts, &Point{
+			Latitude:         r.Geometry.Location.Lat,
+			Longitude:        r.Geometry.Location.Lng,
+			FormattedAddress: r.FormattedAddress,
+		})
 	}
 
-	return &geoPoint, nil
+	return pts, nil
 }
 
 func (g *geoCodeService) Clear() error {
@@ -257,6 +277,17 @@ func (g *geoCodeService) Clear() error {
 		}
 	}
 	return nil
+}
+
+func (g *geoCodeService) latLngURL(lat, long float64) string {
+	latLngStr := fmt.Sprintf("%f,%f", lat, long)
+	return fmt.Sprintf(
+		"%s%s?latlng=%s&sensor=false&key=%s",
+		g.config.Host,
+		g.config.Path,
+		latLngStr,
+		g.config.GeocoderKey,
+	)
 }
 
 func (g *geoCodeService) postalCodeURL(countryCode, postalCode string) string {

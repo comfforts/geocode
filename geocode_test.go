@@ -29,6 +29,7 @@ func TestGeocoder(t *testing.T) {
 	){
 		"gecoding postal code succeeds":   testGeocodePostalcode,
 		"gecoding address succeeds":       testGeocodeAddress,
+		"gecoding lat/lng succeeds":       testGeocodeLatLong,
 		"cache compression test succeeds": testCompression,
 	} {
 		testCfg := getTestConfig()
@@ -96,6 +97,21 @@ func testGeocodePostalcode(t *testing.T, client *geoCodeService) {
 	require.NoError(t, err)
 	require.Equal(t, "33.66", fmt.Sprintf("%0.2f", pt.Latitude))
 	require.Equal(t, "-117.83", fmt.Sprintf("%0.2f", pt.Longitude))
+}
+
+func testGeocodeLatLong(t *testing.T, client *geoCodeService) {
+	postalCode := "92612"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pt, err := client.Geocode(ctx, postalCode, "")
+	require.NoError(t, err)
+	require.Equal(t, "33.66", fmt.Sprintf("%0.2f", pt.Latitude))
+	require.Equal(t, "-117.83", fmt.Sprintf("%0.2f", pt.Longitude))
+
+	pt, err = client.GeocodeLatLong(ctx, pt.Latitude, pt.Longitude)
+	require.NoError(t, err)
+	fmt.Printf("pt: %v\n", pt)
 }
 
 func testGeocodeAddress(t *testing.T, client *geoCodeService) {
