@@ -158,7 +158,7 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) 
 	}
 
 	if g.config.Cached {
-		key := buildAddressKey(g.addressString(addr))
+		key := g.addressString(addr)
 		point, exp, err := g.getFromCache(key)
 		if err == nil {
 			g.logger.Debug(
@@ -201,18 +201,10 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) 
 	pt := pts[0]
 
 	if g.config.Cached {
-		if g.addressString(addr) == pt.FormattedAddress {
-			key := buildAddressKey(pt.FormattedAddress)
-			err = g.setInCache(key, pt, 0)
-			if err != nil {
-				g.logger.Error("geocoder cache set error", zap.Error(err), zap.String("key", key))
-			}
-		} else {
-			key := buildAddressKey(g.addressString(addr))
-			err = g.setInCache(key, pt, ThirtyDays)
-			if err != nil {
-				g.logger.Error("geocoder cache set error", zap.Error(err), zap.String("key", key))
-			}
+		key := g.addressString(addr)
+		err = g.setInCache(key, pt, 0)
+		if err != nil {
+			g.logger.Error("geocoder cache set error", zap.Error(err), zap.String("key", key))
 		}
 	}
 
@@ -226,7 +218,7 @@ func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, 
 	}
 
 	if g.config.Cached && hint != "" {
-		point, exp, err := g.getFromCache(url.QueryEscape(hint))
+		point, exp, err := g.getFromCache(hint)
 		if err == nil {
 			g.logger.Debug("returning cached value", zap.String("key", hint), zap.Any("exp", exp))
 			return point, nil
@@ -253,7 +245,7 @@ func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, 
 	}
 
 	if g.config.Cached && hint != "" {
-		err = g.setInCache(url.QueryEscape(hint), pt, OneDay)
+		err = g.setInCache(hint, pt, 0)
 		if err != nil {
 			g.logger.Error("geocoder cache set error", zap.Error(err), zap.String("key", hint))
 		}
@@ -374,12 +366,6 @@ func (g *geoCodeService) addressComponentURL(address AddressQuery) string {
 	)
 }
 
-func buildAddressKey(keyStr string) string {
-	key := strings.ToLower(keyStr)
-	key = url.QueryEscape(key)
-	return key
-}
-
 func (g *geoCodeService) addressString(address AddressQuery) string {
 	compStr := ""
 	if address.Street != "" {
@@ -417,6 +403,10 @@ func (g *geoCodeService) addressString(address AddressQuery) string {
 }
 
 func (g *geoCodeService) getFromCache(key string) (*Point, time.Time, error) {
+	key = strings.ReplaceAll(key, " ", "")
+	key = strings.ToLower(key)
+	key = url.QueryEscape(key)
+
 	val, exp, err := g.cache.Get(key)
 	if err != nil {
 		g.logger.Error(cache.ERROR_GET_CACHE, zap.Error(err), zap.String("key", key))
@@ -442,6 +432,11 @@ func (g *geoCodeService) setInCache(
 	if cacheFor == 0 {
 		cacheFor = OneYear
 	}
+
+	key = strings.ReplaceAll(key, " ", "")
+	key = strings.ToLower(key)
+	key = url.QueryEscape(key)
+
 	err := g.cache.Set(key, point, cacheFor)
 	if err != nil {
 		g.logger.Error(cache.ERROR_SET_CACHE, zap.Error(err), zap.String("key", key))
