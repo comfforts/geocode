@@ -191,7 +191,7 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) 
 	}
 
 	req := &maps.GeocodingRequest{
-		Components: g.addressComponents(addr),
+		Address: g.addressString(addr),
 	}
 
 	resp, err := g.client.Geocode(ctx, req)

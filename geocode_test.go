@@ -12,6 +12,7 @@ import (
 	"github.com/comfforts/cloudstorage"
 	"github.com/comfforts/logger"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,7 +74,7 @@ func setupTest(t *testing.T, testCfg testConfig) (
 	gscCfg := GeoCodeServiceConfig{
 		DataDir:     testCfg.dir,
 		BucketName:  testCfg.bucket,
-		Cached:      true,
+		Cached:      false,
 		GeocoderKey: testCfg.key,
 	}
 	gsc, err := NewGeoCodeService(gscCfg, csc, appLogger)
@@ -134,8 +135,10 @@ func testGeocodeAddress(t *testing.T, client *geoCodeService) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, err := client.GeocodeAddress(ctx, address)
+	pt, err := client.GeocodeAddress(ctx, address)
 	require.NoError(t, err)
+	assert.Equal(t, pt.FormattedAddress, "Google Building 40, 1600 Amphitheatre Pkwy, Mountain View, CA 94043, USA", "returned address should match")
+	t.Logf("geo located to %v", pt)
 
 	address = AddressQuery{
 		Street:     "1045 La Avenida St",
@@ -144,8 +147,10 @@ func testGeocodeAddress(t *testing.T, client *geoCodeService) {
 		State:      "CA",
 		Country:    "US",
 	}
-	_, err = client.GeocodeAddress(ctx, address)
+	pt, err = client.GeocodeAddress(ctx, address)
 	require.NoError(t, err)
+	assert.Equal(t, pt.FormattedAddress, "1045 La Avenida St, Mountain View, CA 94043, USA", "returned address should match")
+	t.Logf("geo located to %v", pt)
 
 	address = AddressQuery{
 		Street:     "2001 Market St",
@@ -154,8 +159,10 @@ func testGeocodeAddress(t *testing.T, client *geoCodeService) {
 		State:      "CA",
 		Country:    "US",
 	}
-	_, err = client.GeocodeAddress(ctx, address)
+	pt, err = client.GeocodeAddress(ctx, address)
 	require.NoError(t, err)
+	assert.Equal(t, pt.FormattedAddress, "2001 Market St, San Francisco, CA 94114, USA", "returned address should match")
+	t.Logf("geo located to %v", pt)
 
 	address = AddressQuery{
 		Street:     "2 Maxwell Ct",
@@ -164,15 +171,19 @@ func testGeocodeAddress(t *testing.T, client *geoCodeService) {
 		State:      "CA",
 		Country:    "US",
 	}
-	_, err = client.GeocodeAddress(ctx, address)
+	pt, err = client.GeocodeAddress(ctx, address)
 	require.NoError(t, err)
+	assert.Equal(t, pt.FormattedAddress, "2 Maxwell Ct, San Francisco, CA 94103, USA", "returned address should match")
+	t.Logf("geo located to %v", pt)
 
 	address = AddressQuery{
 		PostalCode: "94952",
 		Country:    "US",
 	}
-	_, err = client.GeocodeAddress(ctx, address)
+	pt, err = client.GeocodeAddress(ctx, address)
 	require.NoError(t, err)
+	assert.Equal(t, pt.FormattedAddress, "Petaluma, CA 94952, USA", "returned address should match")
+	t.Logf("geo located to %v", pt)
 }
 
 func testCompression(t *testing.T, geo *geoCodeService) {
