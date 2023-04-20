@@ -16,13 +16,17 @@ const (
 )
 
 var (
-	ErrNilContext = errors.NewAppError("context is nil")
+	ErrNilContext        = errors.NewAppError("context is nil")
+	ErrGeoCodePostalCode = errors.NewAppError(ERROR_GEOCODING_POSTAL)
+	ErrGeoCodeAddress    = errors.NewAppError(ERROR_GEOCODING_ADDRESS)
+	ErrGeoCodeNoResults  = errors.NewAppError(NO_RESULTS)
 )
 
 const (
-	ERROR_GEOCODING_POSTALCODE string = "error geocoding postal code"
-	ERROR_GEOCODING_ADDRESS    string = "error geocoding address"
-	ERROR_NO_FILE              string = "%s doesn't exist"
-	ERROR_FILE_INACCESSIBLE    string = "%s inaccessible"
-	ERROR_CREATING_FILE        string = "creating file %s"
+	ERROR_GEOCODING_POSTAL  string = "error geocoding postal code"
+	ERROR_GEOCODING_ADDRESS string = "error geocoding address"
+	ERROR_NO_FILE           string = "%s doesn't exist"
+	ERROR_FILE_INACCESSIBLE string = "%s inaccessible"
+	ERROR_CREATING_FILE     string = "creating file %s"
+	NO_RESULTS              string = "no results found"
 )

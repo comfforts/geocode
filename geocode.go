@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 	"github.com/comfforts/cloudstorage"
 	"github.com/comfforts/errors"
 	"github.com/comfforts/logger"
+	"googlemaps.github.io/maps"
 
 	"go.uber.org/zap"
 )
@@ -37,8 +37,6 @@ type GeoCoder interface {
 
 type GeoCodeServiceConfig struct {
 	GeocoderKey string `json:"geocoder_key"`
-	Host        string `json:"host"`
-	Path        string `json:"path"`
 	Cached      bool   `json:"cached"`
 	DataDir     string `json:"data_dir"`
 	BucketName  string `json:"bucket_name"`
@@ -48,6 +46,7 @@ type geoCodeService struct {
 	config       GeoCodeServiceConfig
 	logger       logger.AppLogger
 	cache        cache.CacheService
+	client       *maps.Client
 	cloudStorage cloudstorage.CloudStorage
 }
 
@@ -76,18 +75,17 @@ func NewGeoCodeService(
 		return nil, errors.NewAppError(errors.ERROR_MISSING_REQUIRED)
 	}
 
-	if cfg.Host == "" {
-		cfg.Host = "https://maps.googleapis.com"
-	}
-
-	if cfg.Path == "" {
-		cfg.Path = "/maps/api/geocode/json"
+	c, err := maps.NewClient(maps.WithAPIKey(cfg.GeocoderKey))
+	if err != nil {
+		logger.Error("error initializing google maps client")
+		return nil, err
 	}
 
 	gcSrv := geoCodeService{
 		config:       cfg,
 		logger:       logger,
 		cloudStorage: csc,
+		client:       c,
 	}
 
 	if cfg.Cached {
@@ -130,13 +128,29 @@ func (g *geoCodeService) Geocode(ctx context.Context, postalCode, countryCode st
 		}
 	}
 
-	reqURL := g.postalCodeURL(countryCode, postalCode)
-	pts, err := g.geocode(reqURL)
+	req := &maps.GeocodingRequest{
+		Components: map[maps.Component]string{
+			maps.ComponentPostalCode: postalCode,
+			maps.ComponentCountry:    countryCode,
+		},
+	}
+	resp, err := g.client.Geocode(ctx, req)
 	if err != nil {
-		return nil, err
+		g.logger.Error(ERROR_GEOCODING_POSTAL, zap.Error(err))
+		return nil, ErrGeoCodePostalCode
 	}
 
-	pt := pts[0]
+	if len(resp) < 1 {
+		g.logger.Error(NO_RESULTS)
+		return nil, ErrGeoCodeNoResults
+	}
+
+	r := resp[0]
+	pt := &Point{
+		Latitude:         r.Geometry.Location.Lat,
+		Longitude:        r.Geometry.Location.Lng,
+		FormattedAddress: r.FormattedAddress,
+	}
 	if g.config.Cached {
 		err = g.setInCache(postalCode, pt, 0)
 		if err != nil {
@@ -176,29 +190,27 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) 
 		}
 	}
 
-	reqURL := g.addressURL(addr)
-	pts, err := g.geocode(reqURL)
-	if err != nil {
-		reqURL = g.addressComponentURL(addr)
-		pts, err = g.geocode(reqURL)
-		if err != nil {
-			reqURL = g.postalCodeURL(addr.Country, addr.PostalCode)
-			pts, err = g.geocode(reqURL)
-			if err != nil {
-				g.logger.Error(
-					"geocoder request error",
-					zap.Error(err),
-					zap.String("country",
-						addr.Country),
-					zap.String("postal",
-						addr.PostalCode,
-					))
-				return nil, err
-			}
-		}
+	req := &maps.GeocodingRequest{
+		Components: g.addressComponents(addr),
 	}
 
-	pt := pts[0]
+	resp, err := g.client.Geocode(ctx, req)
+	if err != nil {
+		g.logger.Error(ERROR_GEOCODING_ADDRESS, zap.Error(err))
+		return nil, ErrGeoCodeAddress
+	}
+
+	if len(resp) < 1 {
+		g.logger.Error(NO_RESULTS)
+		return nil, ErrGeoCodeNoResults
+	}
+
+	r := resp[0]
+	pt := &Point{
+		Latitude:         r.Geometry.Location.Lat,
+		Longitude:        r.Geometry.Location.Lng,
+		FormattedAddress: r.FormattedAddress,
+	}
 
 	if g.config.Cached {
 		key := g.addressString(addr)
@@ -227,21 +239,28 @@ func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, 
 		}
 	}
 
-	reqURL := g.latLngURL(lat, long)
-	pts, err := g.geocode(reqURL)
+	req := &maps.GeocodingRequest{
+		LatLng: &maps.LatLng{
+			Lat: lat,
+			Lng: long,
+		},
+	}
+	resp, err := g.client.Geocode(ctx, req)
 	if err != nil {
-		return nil, err
+		g.logger.Error(ERROR_GEOCODING_ADDRESS, zap.Error(err))
+		return nil, ErrGeoCodeAddress
 	}
 
-	var pt *Point
-	for _, p := range pts {
-		if strings.Contains(p.FormattedAddress, hint) {
-			pt = p
-			break
-		}
+	if len(resp) < 1 {
+		g.logger.Error(NO_RESULTS)
+		return nil, ErrGeoCodeNoResults
 	}
-	if pt == nil {
-		pt = pts[0]
+
+	r := resp[0]
+	pt := &Point{
+		Latitude:         r.Geometry.Location.Lat,
+		Longitude:        r.Geometry.Location.Lng,
+		FormattedAddress: r.FormattedAddress,
 	}
 
 	if g.config.Cached && hint != "" {
@@ -252,33 +271,6 @@ func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, 
 	}
 
 	return pt, nil
-}
-
-func (g *geoCodeService) geocode(url string) ([]*Point, error) {
-	r, err := http.Get(url)
-	if err != nil {
-		g.logger.Error("geocoder request error", zap.Error(err))
-		return nil, err
-	}
-	defer r.Body.Close()
-
-	var results GeocoderResults
-	err = json.NewDecoder(r.Body).Decode(&results)
-	if err != nil || &results == (*GeocoderResults)(nil) || len(results.Results) < 1 {
-		g.logger.Error(ERROR_GEOCODING_ADDRESS, zap.Error(err))
-		return nil, errors.NewAppError(ERROR_GEOCODING_ADDRESS)
-	}
-
-	pts := []*Point{}
-	for _, r := range results.Results {
-		pts = append(pts, &Point{
-			Latitude:         r.Geometry.Location.Lat,
-			Longitude:        r.Geometry.Location.Lng,
-			FormattedAddress: r.FormattedAddress,
-		})
-	}
-
-	return pts, nil
 }
 
 func (g *geoCodeService) Clear() error {
@@ -299,71 +291,24 @@ func (g *geoCodeService) Clear() error {
 	return nil
 }
 
-func (g *geoCodeService) latLngURL(lat, long float64) string {
-	latLngStr := fmt.Sprintf("%f,%f", lat, long)
-	return fmt.Sprintf(
-		"%s%s?latlng=%s&sensor=false&key=%s",
-		g.config.Host,
-		g.config.Path,
-		latLngStr,
-		g.config.GeocoderKey,
-	)
-}
-
-func (g *geoCodeService) postalCodeURL(countryCode, postalCode string) string {
-	compStr := fmt.Sprintf("country:%s|postal_code:%s", countryCode, postalCode)
-	return fmt.Sprintf(
-		"%s%s?components=%s&sensor=false&key=%s",
-		g.config.Host,
-		g.config.Path,
-		compStr,
-		g.config.GeocoderKey,
-	)
-}
-
-func (g *geoCodeService) addressURL(addr AddressQuery) string {
-	addrStr := url.QueryEscape(g.addressString(addr))
-	return fmt.Sprintf(
-		"%s%s?address=%s&sensor=false&key=%s",
-		g.config.Host,
-		g.config.Path,
-		addrStr,
-		g.config.GeocoderKey,
-	)
-}
-
-func (g *geoCodeService) addressComponentURL(address AddressQuery) string {
-	components := map[string]string{}
-	if address.Street != "" {
-		components["street_address"] = url.QueryEscape(address.Street)
+func (g *geoCodeService) addressComponents(addrQ AddressQuery) map[maps.Component]string {
+	components := map[maps.Component]string{}
+	if addrQ.Street != "" {
+		components[maps.Component("street_address")] = addrQ.Street
 	}
-	if address.City != "" {
-		components["locality"] = url.QueryEscape(address.City)
+	if addrQ.City != "" {
+		components[maps.ComponentLocality] = addrQ.City
 	}
-	if address.State != "" {
-		components["administrative_area_level_1"] = url.QueryEscape(address.State)
+	if addrQ.State != "" {
+		components[maps.Component("administrative_area_level_1")] = addrQ.State
 	}
-	if address.PostalCode != "" {
-		components["postal_code"] = url.QueryEscape(address.PostalCode)
+	if addrQ.PostalCode != "" {
+		components[maps.ComponentPostalCode] = addrQ.PostalCode
 	}
-	if address.Country != "" {
-		components["country"] = url.QueryEscape(address.Country)
+	if addrQ.Country != "" {
+		components[maps.ComponentCountry] = addrQ.Country
 	}
-	compStr := ""
-	for k, v := range components {
-		if compStr == "" {
-			compStr = fmt.Sprintf("%s:%s", k, v)
-		} else {
-			compStr = fmt.Sprintf("%s|%s:%s", compStr, k, v)
-		}
-	}
-	return fmt.Sprintf(
-		"%s%s?components=%s&sensor=false&key=%s",
-		g.config.Host,
-		g.config.Path,
-		compStr,
-		g.config.GeocoderKey,
-	)
+	return components
 }
 
 func (g *geoCodeService) addressString(address AddressQuery) string {
