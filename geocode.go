@@ -230,9 +230,8 @@ func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, 
 	}
 
 	if g.config.Cached && hint != "" {
-		point, exp, err := g.getFromCache(hint)
+		point, _, err := g.getFromCache(hint)
 		if err == nil {
-			g.logger.Debug("returning cached value", zap.String("key", hint), zap.Any("exp", exp))
 			return point, nil
 		} else {
 			g.logger.Error("geocoder cache get error", zap.Error(err), zap.String("key", hint))
@@ -274,41 +273,23 @@ func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, 
 }
 
 func (g *geoCodeService) Clear() error {
-	g.logger.Info("cleaning up geo code data structures")
-	if g.config.Cached && g.cache.Updated() {
-		err := g.cache.SaveFile()
-		if err != nil {
-			g.logger.Error("error saving geocoder cache", zap.Error(err))
-			return err
-		} else {
-			err = g.uploadCache()
+	if g.config.Cached {
+		if g.cache.Updated() {
+			g.logger.Info("cleaning up geo code data structures")
+			err := g.cache.SaveFile()
 			if err != nil {
-				g.logger.Error("error uploading geocoder cache", zap.Error(err))
+				g.logger.Error("error saving geocoder cache", zap.Error(err))
 				return err
+			} else {
+				err = g.uploadCache()
+				if err != nil {
+					g.logger.Error("error uploading geocoder cache", zap.Error(err))
+					return err
+				}
 			}
 		}
 	}
 	return nil
-}
-
-func (g *geoCodeService) addressComponents(addrQ AddressQuery) map[maps.Component]string {
-	components := map[maps.Component]string{}
-	if addrQ.Street != "" {
-		components[maps.Component("street_address")] = addrQ.Street
-	}
-	if addrQ.City != "" {
-		components[maps.ComponentLocality] = addrQ.City
-	}
-	if addrQ.State != "" {
-		components[maps.Component("administrative_area_level_1")] = addrQ.State
-	}
-	if addrQ.PostalCode != "" {
-		components[maps.ComponentPostalCode] = addrQ.PostalCode
-	}
-	if addrQ.Country != "" {
-		components[maps.ComponentCountry] = addrQ.Country
-	}
-	return components
 }
 
 func (g *geoCodeService) addressString(address AddressQuery) string {
@@ -348,23 +329,18 @@ func (g *geoCodeService) addressString(address AddressQuery) string {
 }
 
 func (g *geoCodeService) getFromCache(key string) (*Point, time.Time, error) {
-	key = strings.ReplaceAll(key, " ", "")
-	key = strings.ToLower(key)
-	key = url.QueryEscape(key)
-
+	key = g.buildKey(key)
 	val, exp, err := g.cache.Get(key)
 	if err != nil {
-		g.logger.Error(cache.ERROR_GET_CACHE, zap.Error(err), zap.String("key", key))
-		return nil, exp, err
+		return nil, exp, errors.WrapError(err, "error getting cache value for %s", key)
+	}
+
+	if exp.Unix() <= time.Now().Unix() {
+		return nil, exp, errors.NewAppError("cache expired for %s", key)
 	}
 	point, ok := val.(Point)
 	if !ok {
-		g.logger.Error(
-			"error getting cache point value",
-			zap.Error(cache.ErrGetCache),
-			zap.String("key", key),
-		)
-		return nil, exp, cache.ErrGetCache
+		return nil, exp, errors.NewAppError("error marshalling value from cache item for %s", key)
 	}
 	return &point, exp, nil
 }
@@ -378,13 +354,9 @@ func (g *geoCodeService) setInCache(
 		cacheFor = OneYear
 	}
 
-	key = strings.ReplaceAll(key, " ", "")
-	key = strings.ToLower(key)
-	key = url.QueryEscape(key)
-
+	key = g.buildKey(key)
 	err := g.cache.Set(key, point, cacheFor)
 	if err != nil {
-		g.logger.Error(cache.ERROR_SET_CACHE, zap.Error(err), zap.String("key", key))
 		return err
 	}
 	return nil
@@ -513,6 +485,13 @@ func (g *geoCodeService) downloadCache() error {
 		zap.Int64("bytes", n),
 	)
 	return nil
+}
+
+func (g *geoCodeService) buildKey(key string) string {
+	key = strings.ReplaceAll(key, " ", "")
+	key = strings.ToLower(key)
+	key = url.QueryEscape(key)
+	return key
 }
 
 func createDirectory(path string) error {
