@@ -74,7 +74,7 @@ func setupTest(t *testing.T, testCfg testConfig) (
 	gscCfg := GeoCodeServiceConfig{
 		DataDir:     testCfg.dir,
 		BucketName:  testCfg.bucket,
-		Cached:      false,
+		Cached:      true,
 		GeocoderKey: testCfg.key,
 	}
 	gsc, err := NewGeoCodeService(gscCfg, csc, appLogger)
@@ -196,10 +196,8 @@ func testCompression(t *testing.T, geo *geoCodeService) {
 	}
 	addrStr := strings.ToLower(geo.addressString(addr))
 	addrStr = url.QueryEscape(addrStr)
-	fmt.Println("address string: ", addrStr)
 	sEnc := base64.StdEncoding.EncodeToString([]byte(addrStr))
-	fmt.Printf("encoded address string: %s, len: %d\n", sEnc, len(sEnc))
 
 	sDec, _ := base64.StdEncoding.DecodeString(sEnc)
-	fmt.Printf("decoded address string: %s, len: %d\n", string(sDec), len(string(sDec)))
+	require.Equal(t, addrStr, string(sDec))
 }
