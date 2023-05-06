@@ -229,8 +229,9 @@ func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, 
 		return nil, ErrNilContext
 	}
 
-	if g.config.Cached && hint != "" {
-		point, _, err := g.getFromCache(hint)
+	if g.config.Cached {
+		key := g.buildLatLngKey(lat, long)
+		point, _, err := g.getFromCache(key)
 		if err == nil {
 			return point, nil
 		} else {
@@ -262,8 +263,9 @@ func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, 
 		FormattedAddress: r.FormattedAddress,
 	}
 
-	if g.config.Cached && hint != "" {
-		err = g.setInCache(hint, pt, 0)
+	if g.config.Cached {
+		key := g.buildLatLngKey(lat, long)
+		err = g.setInCache(key, pt, 0)
 		if err != nil {
 			g.logger.Error("geocoder cache set error", zap.Error(err), zap.String("key", hint))
 		}
@@ -492,6 +494,13 @@ func (g *geoCodeService) buildKey(key string) string {
 	key = strings.ToLower(key)
 	key = url.QueryEscape(key)
 	return key
+}
+
+func (g *geoCodeService) buildLatLngKey(lat, lng float64) string {
+	if lat == 0 || lng == 0 {
+		return "lat0lng0"
+	}
+	return fmt.Sprintf("lat%.6flng%.6f", lat, lng)
 }
 
 func createDirectory(path string) error {
