@@ -1,5 +1,14 @@
 package geocode
 
+type DistanceUnit string
+
+const (
+	KM     DistanceUnit = "KM"
+	MILES  DistanceUnit = "MILES"
+	METERS DistanceUnit = "METERS"
+	FEET   DistanceUnit = "FEET"
+)
+
 type GeocoderResults struct {
 	Results []Result `json:"results"`
 	Status  string   `json:"status"`
@@ -45,6 +54,11 @@ type Point struct {
 	Longitude        float64 `json:"longitude"`
 	FormattedAddress string  `json:"formatted_address"`
 }
+
+func (p *Point) IsValid() bool {
+	return p.Latitude != 0 && p.Longitude != 0
+}
+
 type Range struct {
 	Min float64
 	Max float64

@@ -32,6 +32,7 @@ func TestGeocoder(t *testing.T) {
 		"gecoding address succeeds":       testGeocodeAddress,
 		"gecoding lat/lng succeeds":       testGeocodeLatLong,
 		"gecoding intl lat/lng succeeds":  testIntlLatLong,
+		"test distance, succeeds":         testDistance,
 		"cache compression test succeeds": testCompression,
 	} {
 		testCfg := getTestConfig()
@@ -184,6 +185,47 @@ func testGeocodeAddress(t *testing.T, client *geoCodeService) {
 	require.NoError(t, err)
 	assert.Equal(t, pt.FormattedAddress, "Petaluma, CA 94952, USA", "returned address should match")
 	t.Logf("geo located to %v", pt)
+}
+
+func testDistance(t *testing.T, client *geoCodeService) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pt1, err := client.GeocodeAddress(ctx, AddressQuery{
+		Street:     "2001 Market St",
+		City:       "San Francisco",
+		PostalCode: "94114",
+		State:      "CA",
+		Country:    "USA",
+	})
+	require.NoError(t, err)
+
+	pt2, err := client.GeocodeAddress(ctx, AddressQuery{
+		Street:     "2 Maxwell Ct",
+		City:       "San Francisco",
+		PostalCode: "94103",
+		State:      "CA",
+		Country:    "USA",
+	})
+	require.NoError(t, err)
+	u := KM
+	d, err := client.GetDistance(ctx, u, pt1, pt2)
+	require.NoError(t, err)
+	fmt.Printf("%v is %0.2f %s from %v", pt1, d, u, pt2)
+
+	u = METERS
+	d, err = client.GetDistance(ctx, u, pt1, pt2)
+	require.NoError(t, err)
+	fmt.Printf("%v is %0.2f %s from %v", pt1, d, u, pt2)
+
+	u = MILES
+	d, err = client.GetDistance(ctx, u, pt1, pt2)
+	require.NoError(t, err)
+	fmt.Printf("%v is %0.2f %s from %v", pt1, d, u, pt2)
+
+	u = FEET
+	d, err = client.GetDistance(ctx, u, pt1, pt2)
+	require.NoError(t, err)
+	fmt.Printf("%v is %0.2f %s from %v", pt1, d, u, pt2)
 }
 
 func testCompression(t *testing.T, geo *geoCodeService) {

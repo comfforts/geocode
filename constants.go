@@ -15,13 +15,6 @@ const (
 	ThirtyMinutes = 30 * time.Minute
 )
 
-var (
-	ErrNilContext        = errors.NewAppError("context is nil")
-	ErrGeoCodePostalCode = errors.NewAppError(ERROR_GEOCODING_POSTAL)
-	ErrGeoCodeAddress    = errors.NewAppError(ERROR_GEOCODING_ADDRESS)
-	ErrGeoCodeNoResults  = errors.NewAppError(NO_RESULTS)
-)
-
 const (
 	ERROR_GEOCODING_POSTAL  string = "error geocoding postal code"
 	ERROR_GEOCODING_ADDRESS string = "error geocoding address"
@@ -29,4 +22,15 @@ const (
 	ERROR_FILE_INACCESSIBLE string = "%s inaccessible"
 	ERROR_CREATING_FILE     string = "creating file %s"
 	NO_RESULTS              string = "no results found"
+	ERR_INVALID_LAT_LNG     string = "invalid geo lat/lng"
+	ERR_INVALID_UNIT        string = "invalid geo distance unit"
+)
+
+var (
+	ErrNilContext        = errors.NewAppError("context is nil")
+	ErrGeoCodePostalCode = errors.NewAppError(ERROR_GEOCODING_POSTAL)
+	ErrGeoCodeAddress    = errors.NewAppError(ERROR_GEOCODING_ADDRESS)
+	ErrGeoCodeNoResults  = errors.NewAppError(NO_RESULTS)
+	ErrInvalidGeoLatLng  = errors.NewAppError(ERR_INVALID_LAT_LNG)
+	ErrInvalidGeoUnit    = errors.NewAppError(ERR_INVALID_UNIT)
 )
