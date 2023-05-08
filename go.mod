@@ -8,6 +8,7 @@ require (
 	github.com/comfforts/errors v0.1.1
 	github.com/comfforts/logger v0.1.1
 	github.com/stretchr/testify v1.8.1
+	gitlab.com/xerra/common/vincenty v0.0.0-20200407041038-0fe7b2620a3b
 	go.uber.org/zap v1.24.0
 	googlemaps.github.io/maps v1.4.0
 )

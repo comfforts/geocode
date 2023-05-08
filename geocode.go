@@ -11,13 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"gitlab.com/xerra/common/vincenty"
+	"go.uber.org/zap"
+	"googlemaps.github.io/maps"
+
 	"github.com/comfforts/cache"
 	"github.com/comfforts/cloudstorage"
 	"github.com/comfforts/errors"
 	"github.com/comfforts/logger"
-	"googlemaps.github.io/maps"
-
-	"go.uber.org/zap"
 )
 
 type AddressQuery struct {
@@ -32,6 +33,7 @@ type GeoCoder interface {
 	Geocode(ctx context.Context, postalCode, countryCode string) (*Point, error)
 	GeocodeAddress(ctx context.Context, addr AddressQuery) (*Point, error)
 	GeocodeLatLong(ctx context.Context, lat, long float64, hint string) (*Point, error)
+	GetDistance(ctx context.Context, u DistanceUnit, source, dest *Point) (float64, error)
 	Clear() error
 }
 
@@ -272,6 +274,29 @@ func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, 
 	}
 
 	return pt, nil
+}
+
+func (g *geoCodeService) GetDistance(ctx context.Context, u DistanceUnit, source, dest *Point) (float64, error) {
+	if source == nil || dest == nil || !source.IsValid() || !dest.IsValid() {
+		return 0, ErrInvalidGeoLatLng
+	}
+
+	origin := vincenty.LatLng{Latitude: source.Latitude, Longitude: source.Longitude}
+	end := vincenty.LatLng{Latitude: dest.Latitude, Longitude: dest.Longitude}
+	d := vincenty.Inverse(origin, end)
+
+	switch u {
+	case KM:
+		return d.Kilometers(), nil
+	case MILES:
+		return d.Miles(), nil
+	case METERS:
+		return d.Meters(), nil
+	case FEET:
+		return d.Feet(), nil
+	default:
+		return 0, ErrInvalidGeoUnit
+	}
 }
 
 func (g *geoCodeService) Clear() error {
