@@ -584,6 +584,22 @@ func (g *geoCodeService) buildLatLngKey(lat, lng float64) string {
 	return key
 }
 
+func (g *geoCodeService) buildRouteLatLngKey(origin, dest *Point) string {
+	orKey := fmt.Sprintf("or:%s", g.buildLatLngKey(origin.Latitude, origin.Longitude))
+	destKey := fmt.Sprintf("dt:%s", g.buildLatLngKey(origin.Latitude, origin.Longitude))
+
+	key := fmt.Sprintf("%s%s", orKey, destKey)
+	return key
+}
+
+func (g *geoCodeService) buildRouteAddrKey(origin, dest *AddressQuery) string {
+	orKey := fmt.Sprintf("or:%s", g.buildKey(origin.addressString()))
+	destKey := fmt.Sprintf("dt:%s", g.buildKey(dest.addressString()))
+
+	key := fmt.Sprintf("%s%s", orKey, destKey)
+	return key
+}
+
 func createDirectory(path string) error {
 	_, err := os.Stat(filepath.Dir(path))
 	if err != nil {
