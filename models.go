@@ -1,5 +1,10 @@
 package geocode
 
+import (
+	"fmt"
+	"time"
+)
+
 type DistanceUnit string
 
 const (
@@ -66,4 +71,55 @@ type Range struct {
 type RangeBounds struct {
 	Latitude  Range
 	Longitude Range
+}
+
+type RouteLeg struct {
+	Start    string
+	End      string
+	Duration time.Duration
+	Distance int
+}
+
+type AddressQuery struct {
+	Street     string
+	City       string
+	PostalCode string
+	State      string
+	Country    string
+}
+
+func (a *AddressQuery) addressString() string {
+	compStr := ""
+	if a.Street != "" {
+		compStr = a.Street
+	}
+	if a.City != "" {
+		if compStr == "" {
+			compStr = a.City
+		} else {
+			compStr = fmt.Sprintf("%s %s", compStr, a.City)
+		}
+	}
+	if a.State != "" {
+		if compStr == "" {
+			compStr = a.State
+		} else {
+			compStr = fmt.Sprintf("%s %s", compStr, a.State)
+		}
+	}
+	if a.PostalCode != "" {
+		if compStr == "" {
+			compStr = a.PostalCode
+		} else {
+			compStr = fmt.Sprintf("%s %s", compStr, a.PostalCode)
+		}
+	}
+	if a.Country != "" {
+		if compStr == "" {
+			compStr = a.Country
+		} else {
+			compStr = fmt.Sprintf("%s %s", compStr, a.Country)
+		}
+	}
+	return compStr
 }

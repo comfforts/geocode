@@ -21,19 +21,15 @@ import (
 	"github.com/comfforts/logger"
 )
 
-type AddressQuery struct {
-	Street     string
-	City       string
-	PostalCode string
-	State      string
-	Country    string
-}
-
 type GeoCoder interface {
 	Geocode(ctx context.Context, postalCode, countryCode string) (*Point, error)
-	GeocodeAddress(ctx context.Context, addr AddressQuery) (*Point, error)
+	GeocodeAddress(ctx context.Context, addr *AddressQuery) (*Point, error)
 	GeocodeLatLong(ctx context.Context, lat, long float64, hint string) (*Point, error)
 	GetDistance(ctx context.Context, u DistanceUnit, source, dest *Point) (float64, error)
+	GetRouteForLatLong(ctx context.Context, origin, destination *Point) ([]*RouteLeg, error)
+	GetRouteForAddress(ctx context.Context, origin, destination *AddressQuery) ([]*RouteLeg, error)
+	GetRouteMatrixForLatLong(ctx context.Context, origins, destinations []*Point) ([]*RouteLeg, error)
+	GetRouteMatrixForAddress(ctx context.Context, origins, destinations []*AddressQuery) ([]*RouteLeg, error)
 	Clear() error
 }
 
@@ -163,7 +159,100 @@ func (g *geoCodeService) Geocode(ctx context.Context, postalCode, countryCode st
 	return pt, nil
 }
 
-func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) (*Point, error) {
+func (g *geoCodeService) GetRouteForLatLong(ctx context.Context, origin, destination *Point) ([]*RouteLeg, error) {
+	return g.getRoute(ctx, &maps.DirectionsRequest{
+		Origin:      fmt.Sprintf("%.6f %.6f", origin.Latitude, origin.Longitude),
+		Destination: fmt.Sprintf("%.6f %.6f", destination.Latitude, destination.Longitude),
+	})
+}
+
+func (g *geoCodeService) GetRouteForAddress(ctx context.Context, origin, destination *AddressQuery) ([]*RouteLeg, error) {
+	return g.getRoute(ctx, &maps.DirectionsRequest{
+		Origin:      origin.addressString(),
+		Destination: destination.addressString(),
+	})
+}
+
+func (g *geoCodeService) getRoute(ctx context.Context, req *maps.DirectionsRequest) ([]*RouteLeg, error) {
+	routes, _, err := g.client.Directions(context.Background(), req)
+	if err != nil {
+		g.logger.Error("error getting route", zap.Error(err))
+		return nil, err
+	}
+
+	routeLegs := []*RouteLeg{}
+	for _, rt := range routes {
+		for _, l := range rt.Legs {
+			routeLegs = append(routeLegs, &RouteLeg{
+				Start:    l.StartAddress,
+				End:      l.EndAddress,
+				Duration: l.Duration,
+				Distance: l.Distance.Meters,
+			})
+		}
+	}
+	return routeLegs, nil
+}
+
+func (g *geoCodeService) GetRouteMatrixForAddress(ctx context.Context, origins, destinations []*AddressQuery) ([]*RouteLeg, error) {
+	originStrs := []string{}
+	for _, v := range origins {
+		originStrs = append(originStrs, v.addressString())
+	}
+
+	destStrs := []string{}
+	for _, v := range destinations {
+		destStrs = append(destStrs, v.addressString())
+	}
+
+	return g.getRouteMatrix(ctx, &maps.DistanceMatrixRequest{
+		Origins:      originStrs,
+		Destinations: destStrs,
+	})
+}
+
+func (g *geoCodeService) GetRouteMatrixForLatLong(ctx context.Context, origins, destinations []*Point) ([]*RouteLeg, error) {
+	originStrs := []string{}
+	for _, v := range origins {
+		originStrs = append(originStrs, fmt.Sprintf("%.6f %.6f", v.Latitude, v.Longitude))
+	}
+
+	destStrs := []string{}
+	for _, v := range destinations {
+		destStrs = append(destStrs, fmt.Sprintf("%.6f %.6f", v.Latitude, v.Longitude))
+	}
+
+	return g.getRouteMatrix(ctx, &maps.DistanceMatrixRequest{
+		Origins:      originStrs,
+		Destinations: destStrs,
+	})
+}
+
+func (g *geoCodeService) getRouteMatrix(ctx context.Context, req *maps.DistanceMatrixRequest) ([]*RouteLeg, error) {
+	resp, err := g.client.DistanceMatrix(ctx, req)
+	if err != nil {
+		g.logger.Error("error getting route matrix", zap.Error(err))
+		return nil, err
+	}
+
+	routeLegs := []*RouteLeg{}
+	for i, row := range resp.Rows {
+		for j, elem := range row.Elements {
+			if resp.OriginAddresses[i] != resp.DestinationAddresses[j] {
+				routeLegs = append(routeLegs, &RouteLeg{
+					Start:    resp.OriginAddresses[i],
+					End:      resp.DestinationAddresses[j],
+					Duration: elem.Duration,
+					Distance: elem.Distance.Meters,
+				})
+			}
+		}
+	}
+
+	return routeLegs, nil
+}
+
+func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr *AddressQuery) (*Point, error) {
 	if ctx == nil {
 		g.logger.Error("context is nil", zap.Error(ErrNilContext))
 		return nil, ErrNilContext
@@ -174,7 +263,7 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) 
 	}
 
 	if g.config.Cached {
-		key := g.addressString(addr)
+		key := addr.addressString()
 		point, exp, err := g.getFromCache(key)
 		if err == nil {
 			g.logger.Debug(
@@ -193,7 +282,7 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) 
 	}
 
 	req := &maps.GeocodingRequest{
-		Address: g.addressString(addr),
+		Address: addr.addressString(),
 	}
 
 	resp, err := g.client.Geocode(ctx, req)
@@ -215,7 +304,7 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr AddressQuery) 
 	}
 
 	if g.config.Cached {
-		key := g.addressString(addr)
+		key := addr.addressString()
 		err = g.setInCache(key, pt, 0)
 		if err != nil {
 			g.logger.Error("geocoder cache set error", zap.Error(err), zap.String("key", key))
@@ -317,42 +406,6 @@ func (g *geoCodeService) Clear() error {
 		}
 	}
 	return nil
-}
-
-func (g *geoCodeService) addressString(address AddressQuery) string {
-	compStr := ""
-	if address.Street != "" {
-		compStr = address.Street
-	}
-	if address.City != "" {
-		if compStr == "" {
-			compStr = address.City
-		} else {
-			compStr = fmt.Sprintf("%s %s", compStr, address.City)
-		}
-	}
-	if address.State != "" {
-		if compStr == "" {
-			compStr = address.State
-		} else {
-			compStr = fmt.Sprintf("%s %s", compStr, address.State)
-		}
-	}
-	if address.PostalCode != "" {
-		if compStr == "" {
-			compStr = address.PostalCode
-		} else {
-			compStr = fmt.Sprintf("%s %s", compStr, address.PostalCode)
-		}
-	}
-	if address.Country != "" {
-		if compStr == "" {
-			compStr = address.Country
-		} else {
-			compStr = fmt.Sprintf("%s %s", compStr, address.Country)
-		}
-	}
-	return compStr
 }
 
 func (g *geoCodeService) getFromCache(key string) (*Point, time.Time, error) {
