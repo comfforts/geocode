@@ -6,7 +6,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/comfforts/cloudstorage"
 	"github.com/comfforts/logger"
 
 	"github.com/stretchr/testify/assert"
@@ -67,25 +66,15 @@ func setupTest(t *testing.T, testCfg testConfig) (
 
 	appLogger := logger.NewTestAppLogger(testCfg.dir)
 
-	cscCfg := cloudstorage.CloudStorageClientConfig{
-		CredsPath: testCfg.path,
-	}
-	csc, err := cloudstorage.NewCloudStorageClient(cscCfg, appLogger)
-	require.NoError(t, err)
-
-	gscCfg := geocode.GeoCodeServiceConfig{
-		DataDir:     testCfg.dir,
-		BucketName:  testCfg.bucket,
-		Cached:      true,
+	gscCfg := geocode.Config{
 		GeocoderKey: testCfg.key,
+		AppLogger:   appLogger,
 	}
-	gsc, err := geocode.NewGeoCodeService(gscCfg, csc, appLogger)
+	gsc, err := geocode.NewGeoCodeService(gscCfg)
 	require.NoError(t, err)
 
 	return gsc, func() {
 		t.Log(" TestGeocoder ended")
-		err := gsc.Clear()
-		require.NoError(t, err)
 
 		// err = os.RemoveAll(testCfg.dir)
 		// require.NoError(t, err)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 
-	"github.com/comfforts/cloudstorage"
 	"github.com/comfforts/geocode"
 	"github.com/comfforts/logger"
 	"go.uber.org/zap"
@@ -12,34 +11,21 @@ import (
 
 func main() {
 	dataDir := os.Getenv("DATA_DIR")
-	logger := logger.NewTestAppLogger(dataDir)
+	appLogger := logger.NewTestAppLogger(dataDir)
 
-	credsPath := os.Getenv("CREDS_PATH")
-	bktName := os.Getenv("BUCKET_NAME")
 	geocoderKey := os.Getenv("GEOCODER_KEY")
 
-	cscCfg := cloudstorage.CloudStorageClientConfig{
-		CredsPath: credsPath,
-	}
-	csc, err := cloudstorage.NewCloudStorageClient(cscCfg, logger)
-	if err != nil {
-		logger.Fatal("error setting up cloud storage client", zap.Error(err))
-		return
-	}
-
-	gscCfg := geocode.GeoCodeServiceConfig{
-		DataDir:     dataDir,
-		BucketName:  bktName,
-		Cached:      true,
+	gscCfg := geocode.Config{
 		GeocoderKey: geocoderKey,
+		AppLogger:   appLogger,
 	}
-	gsc, err := geocode.NewGeoCodeService(gscCfg, csc, logger)
+	gsc, err := geocode.NewGeoCodeService(gscCfg)
 	if err != nil {
-		logger.Fatal("error setting up goecode service", zap.Error(err))
+		appLogger.Fatal("error setting up goecode service", zap.Error(err))
 		return
 	}
 
-	testGeocoding(gsc, logger)
+	testGeocoding(gsc, appLogger)
 }
 
 func testGeocoding(gsc geocode.GeoCoder, logger logger.AppLogger) {
@@ -55,10 +41,4 @@ func testGeocoding(gsc geocode.GeoCoder, logger logger.AppLogger) {
 		return
 	}
 	logger.Info("gecoded", zap.String("postalcode", postalCode), zap.String("country", country), zap.Any("point", pt))
-
-	err = gsc.Clear()
-	if err != nil {
-		logger.Error("error cleaning up cache", zap.Error(err))
-		return
-	}
 }
