@@ -2,13 +2,17 @@ package geocode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gitlab.com/xerra/common/vincenty"
 	"googlemaps.github.io/maps"
 
-	"github.com/comfforts/errors"
 	"github.com/comfforts/logger"
+)
+
+const (
+	ERROR_MISSING_REQUIRED string = "required value missing"
 )
 
 type GeoCoder interface {
@@ -38,7 +42,7 @@ func NewGeoCodeService(ctx context.Context, cfg Config) (*geoCodeService, error)
 	}
 
 	if cfg.GeocoderKey == "" {
-		return nil, errors.NewAppError(errors.ERROR_MISSING_REQUIRED)
+		return nil, errors.New(ERROR_MISSING_REQUIRED)
 	}
 
 	c, err := maps.NewClient(maps.WithAPIKey(cfg.GeocoderKey))

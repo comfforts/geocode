@@ -3,7 +3,6 @@ module github.com/comfforts/geocode
 go 1.24.7
 
 require (
-	github.com/comfforts/errors v0.1.11
 	github.com/comfforts/logger v0.2.13
 	github.com/stretchr/testify v1.8.1
 	gitlab.com/xerra/common/vincenty v0.0.0-20200407041038-0fe7b2620a3b
