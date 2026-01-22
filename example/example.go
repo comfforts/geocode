@@ -2,34 +2,41 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/comfforts/geocode"
 	"github.com/comfforts/logger"
-	"go.uber.org/zap"
 )
 
 func main() {
 	dataDir := os.Getenv("DATA_DIR")
-	appLogger := logger.NewTestAppLogger(dataDir)
 
 	geocoderKey := os.Getenv("GEOCODER_KEY")
 
 	gscCfg := geocode.Config{
 		GeocoderKey: geocoderKey,
-		AppLogger:   appLogger,
 	}
-	gsc, err := geocode.NewGeoCodeService(gscCfg)
+
+	l := logger.GetSlogMultiLogger(dataDir)
+	ctx := logger.WithLogger(context.Background(), l)
+
+	gsc, err := geocode.NewGeoCodeService(ctx, gscCfg)
 	if err != nil {
-		appLogger.Fatal("error setting up goecode service", zap.Error(err))
+		l.Error("error setting up goecode service", "error", err.Error())
 		return
 	}
 
-	testGeocoding(gsc, appLogger)
+	testGeocoding(ctx, gsc)
 }
 
-func testGeocoding(gsc geocode.GeoCoder, logger logger.AppLogger) {
-	ctx := context.Background()
+func testGeocoding(ctx context.Context, gsc geocode.GeoCoder) {
+	l, err := logger.LoggerFromContext(ctx)
+	if err != nil {
+		fmt.Printf("NewGeoCodeService - error getting logger from context: %w", err)
+		return
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -37,8 +44,8 @@ func testGeocoding(gsc geocode.GeoCoder, logger logger.AppLogger) {
 
 	pt, err := gsc.Geocode(ctx, postalCode, country)
 	if err != nil {
-		logger.Error("error geocoding", zap.Error(err), zap.String("postalcode", postalCode), zap.String("country", country))
+		l.Error("error geocoding", "error", err.Error(), "postalcode", postalCode, "country", country)
 		return
 	}
-	logger.Info("gecoded", zap.String("postalcode", postalCode), zap.String("country", country), zap.Any("point", pt))
+	l.Info("gecoded", "postalcode", postalCode, "country", country, "point", pt)
 }

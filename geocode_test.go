@@ -3,6 +3,7 @@ package geocode_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"testing"
 
@@ -25,6 +26,7 @@ func TestGeocoder(t *testing.T) {
 	for scenario, fn := range map[string]func(
 		t *testing.T,
 		client geocode.GeoCoder,
+		l *slog.Logger,
 	){
 		"gecoding postal code succeeds":                testGeocodePostalcode,
 		"gecoding address succeeds":                    testGeocodeAddress,
@@ -32,14 +34,14 @@ func TestGeocoder(t *testing.T) {
 		"gecoding intl lat/lng succeeds":               testIntlLatLong,
 		"test distance, succeeds":                      testDistance,
 		"test get route for address, succeeds":         testGetRouteForAddress,
-		"test get route for lat/long, succeeds":        testGetRouteForLatLong,
 		"test get route matrix for lat/long, succeeds": testGetRouteMatrixForLatLong,
+		"test get route for lat/long, succeeds":        testGetRouteForLatLong,
 	} {
 		testCfg := getTestConfig()
 		t.Run(scenario, func(t *testing.T) {
-			client, teardown := setupTest(t, testCfg)
+			client, l, teardown := setupTest(t, testCfg)
 			defer teardown()
-			fn(t, client)
+			fn(t, client, l)
 		})
 	}
 }
@@ -59,31 +61,31 @@ func getTestConfig() testConfig {
 }
 
 func setupTest(t *testing.T, testCfg testConfig) (
-	client geocode.GeoCoder,
-	teardown func(),
+	geocode.GeoCoder,
+	*slog.Logger,
+	func(),
 ) {
 	t.Helper()
 
-	appLogger := logger.NewTestAppLogger(testCfg.dir)
+	l := logger.GetSlogMultiLogger(testCfg.dir)
+	ctx := logger.WithLogger(context.Background(), l)
 
 	gscCfg := geocode.Config{
 		GeocoderKey: testCfg.key,
-		AppLogger:   appLogger,
 	}
-	gsc, err := geocode.NewGeoCodeService(gscCfg)
+	gsc, err := geocode.NewGeoCodeService(ctx, gscCfg)
 	require.NoError(t, err)
 
-	return gsc, func() {
-		t.Log(" TestGeocoder ended")
-
-		// err = os.RemoveAll(testCfg.dir)
-		// require.NoError(t, err)
+	return gsc, l, func() {
+		err = os.RemoveAll(testCfg.dir)
+		require.NoError(t, err)
 	}
 }
 
-func testGeocodePostalcode(t *testing.T, client geocode.GeoCoder) {
+func testGeocodePostalcode(t *testing.T, client geocode.GeoCoder, l *slog.Logger) {
 	postalCode := "92612"
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := logger.WithLogger(context.Background(), l)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	pt, err := client.Geocode(ctx, postalCode, "")
@@ -92,9 +94,73 @@ func testGeocodePostalcode(t *testing.T, client geocode.GeoCoder) {
 	require.Equal(t, "-117.83", fmt.Sprintf("%0.2f", pt.Longitude))
 }
 
-func testGeocodeLatLong(t *testing.T, client geocode.GeoCoder) {
+func testGeocodeAddress(t *testing.T, client geocode.GeoCoder, l *slog.Logger) {
+	address := geocode.AddressQuery{
+		Street:     "1600 Amphitheatre Pkwy",
+		City:       "Mountain View",
+		PostalCode: "94043",
+		State:      "CA",
+		Country:    "US",
+	}
+	ctx := logger.WithLogger(context.Background(), l)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	pt, err := client.GeocodeAddress(ctx, &address)
+	require.NoError(t, err)
+	assert.Equal(t, pt.FormattedAddress, "1600 Amphitheatre Pkwy, Mountain View, CA 94043, USA", "returned address should match")
+	l.Debug("address geo located to", "pt", pt)
+
+	address = geocode.AddressQuery{
+		Street:     "1045 La Avenida St",
+		City:       "Mountain View",
+		PostalCode: "94043",
+		State:      "CA",
+		Country:    "US",
+	}
+	pt, err = client.GeocodeAddress(ctx, &address)
+	require.NoError(t, err)
+	assert.Equal(t, pt.FormattedAddress, "1045 La Avenida St, Mountain View, CA 94043, USA", "returned address should match")
+	l.Debug("address geo located to", "pt", pt)
+
+	address = geocode.AddressQuery{
+		Street:     "2001 Market St",
+		City:       "San Francisco",
+		PostalCode: "94114",
+		State:      "CA",
+		Country:    "US",
+	}
+	pt, err = client.GeocodeAddress(ctx, &address)
+	require.NoError(t, err)
+	assert.Equal(t, pt.FormattedAddress, "2001 Market St, San Francisco, CA 94114, USA", "returned address should match")
+	l.Debug("address geo located to", "pt", pt)
+
+	address = geocode.AddressQuery{
+		Street:     "2 Maxwell Ct",
+		City:       "San Francisco",
+		PostalCode: "94103",
+		State:      "CA",
+		Country:    "US",
+	}
+	pt, err = client.GeocodeAddress(ctx, &address)
+	require.NoError(t, err)
+	assert.Equal(t, pt.FormattedAddress, "2 Maxwell Ct, San Francisco, CA 94103, USA", "returned address should match")
+	l.Debug("address geo located to", "pt", pt)
+
+	address = geocode.AddressQuery{
+		PostalCode: "94952",
+		Country:    "US",
+	}
+	pt, err = client.GeocodeAddress(ctx, &address)
+	require.NoError(t, err)
+	assert.Equal(t, pt.FormattedAddress, "Petaluma, CA 94952, USA", "returned address should match")
+	l.Debug("address geo located to", "pt", pt)
+}
+
+func testGeocodeLatLong(t *testing.T, client geocode.GeoCoder, l *slog.Logger) {
 	postalCode := "92612"
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := logger.WithLogger(context.Background(), l)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	pt, err := client.Geocode(ctx, postalCode, "")
@@ -104,22 +170,96 @@ func testGeocodeLatLong(t *testing.T, client geocode.GeoCoder) {
 
 	pt, err = client.GeocodeLatLong(ctx, pt.Latitude, pt.Longitude, "Irvine")
 	require.NoError(t, err)
-	fmt.Printf("pt: %v\n", pt)
+	l.Debug("lat long geo located to", "pt", pt)
 }
 
-func testIntlLatLong(t *testing.T, client geocode.GeoCoder) {
-	ctx, cancel := context.WithCancel(context.Background())
+func testIntlLatLong(t *testing.T, client geocode.GeoCoder, l *slog.Logger) {
+	ctx := logger.WithLogger(context.Background(), l)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
 	pt, err := client.GeocodeLatLong(ctx, 22.283939361572266, 114.15818786621094, "Exchange Square")
 	require.NoError(t, err)
-	fmt.Printf("pt: %v\n", pt)
+	l.Debug("lat long geo located to", "pt", pt)
 }
 
-func testGetRouteMatrixForLatLong(t *testing.T, client geocode.GeoCoder) {
+func testDistance(t *testing.T, client geocode.GeoCoder, l *slog.Logger) {
+	ctx := logger.WithLogger(context.Background(), l)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	pt1, err := client.GeocodeAddress(ctx, &geocode.AddressQuery{
+		Street:     "2001 Market St",
+		City:       "San Francisco",
+		PostalCode: "94114",
+		State:      "CA",
+		Country:    "USA",
+	})
+	require.NoError(t, err)
+
+	pt2, err := client.GeocodeAddress(ctx, &geocode.AddressQuery{
+		Street:     "2 Maxwell Ct",
+		City:       "San Francisco",
+		PostalCode: "94103",
+		State:      "CA",
+		Country:    "USA",
+	})
+	require.NoError(t, err)
+	u := geocode.KM
+	d, err := client.GetDistance(ctx, u, pt1, pt2)
+	require.NoError(t, err)
+	l.Debug(fmt.Sprintf("%v is %0.2f %s from %v", pt1, d, u, pt2))
+
+	u = geocode.METERS
+	d, err = client.GetDistance(ctx, u, pt1, pt2)
+	require.NoError(t, err)
+	l.Debug(fmt.Sprintf("%v is %0.2f %s from %v", pt1, d, u, pt2))
+
+	u = geocode.MILES
+	d, err = client.GetDistance(ctx, u, pt1, pt2)
+	require.NoError(t, err)
+	l.Debug(fmt.Sprintf("%v is %0.2f %s from %v", pt1, d, u, pt2))
+
+	u = geocode.FEET
+	d, err = client.GetDistance(ctx, u, pt1, pt2)
+	require.NoError(t, err)
+	l.Debug(fmt.Sprintf("%v is %0.2f %s from %v", pt1, d, u, pt2))
+}
+
+func testGetRouteForAddress(t *testing.T, client geocode.GeoCoder, l *slog.Logger) {
+	origin := geocode.AddressQuery{
+		Street:     "1600 Amphitheatre Pkwy",
+		City:       "Mountain View",
+		PostalCode: "94043",
+		State:      "CA",
+		Country:    "USA",
+	}
+
+	destination := geocode.AddressQuery{
+		Street:     "1045 La Avenida St",
+		City:       "Mountain View",
+		PostalCode: "94043",
+		State:      "CA",
+		Country:    "US",
+	}
+
+	ctx := logger.WithLogger(context.Background(), l)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	routeLegs, err := client.GetRouteForAddress(ctx, &origin, &destination)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(routeLegs))
+	for _, rl := range routeLegs {
+		l.Debug("route leg", "start", rl.Start, "end", rl.End, "duration", rl.Duration, "distance", rl.Distance, "unit", geocode.METERS)
+	}
+}
+
+func testGetRouteMatrixForLatLong(t *testing.T, client geocode.GeoCoder, l *slog.Logger) {
 	origins := []*geocode.Point{}
 	dests := []*geocode.Point{}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := logger.WithLogger(context.Background(), l)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	sPt, err := client.GeocodeAddress(ctx, &geocode.AddressQuery{
@@ -154,12 +294,14 @@ func testGetRouteMatrixForLatLong(t *testing.T, client geocode.GeoCoder) {
 	dests = append(dests, dPt)
 
 	routeLegs, err := client.GetRouteMatrixForLatLong(ctx, origins, dests)
-	require.Equal(t, 3, len(routeLegs))
-	t.Logf("testGetRouteMatrixForLatLong - routeLegs: %v", routeLegs)
 	require.NoError(t, err)
+	require.Equal(t, 3, len(routeLegs))
+	for _, rl := range routeLegs {
+		l.Debug("route leg", "start", rl.Start, "end", rl.End, "duration", rl.Duration, "distance", rl.Distance, "unit", geocode.METERS)
+	}
 }
 
-func testGetRouteForLatLong(t *testing.T, client geocode.GeoCoder) {
+func testGetRouteForLatLong(t *testing.T, client geocode.GeoCoder, l *slog.Logger) {
 	origin := geocode.AddressQuery{
 		Street:     "1600 Amphitheatre Pkwy",
 		City:       "Mountain View",
@@ -176,7 +318,8 @@ func testGetRouteForLatLong(t *testing.T, client geocode.GeoCoder) {
 		Country:    "US",
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := logger.WithLogger(context.Background(), l)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	oPt, err := client.GeocodeAddress(ctx, &origin)
@@ -186,136 +329,9 @@ func testGetRouteForLatLong(t *testing.T, client geocode.GeoCoder) {
 	require.NoError(t, err)
 
 	routeLegs, err := client.GetRouteForLatLong(ctx, oPt, dPt)
+	require.NoError(t, err)
 	require.Equal(t, 1, len(routeLegs))
-	t.Logf("testGetRouteForLatLong - routeLegs: %v", routeLegs)
-	require.NoError(t, err)
-}
-
-func testGetRouteForAddress(t *testing.T, client geocode.GeoCoder) {
-	origin := geocode.AddressQuery{
-		Street:     "1600 Amphitheatre Pkwy",
-		City:       "Mountain View",
-		PostalCode: "94043",
-		State:      "CA",
-		Country:    "USA",
+	for _, rl := range routeLegs {
+		l.Debug("route leg", "start", rl.Start, "end", rl.End, "duration", rl.Duration, "distance", rl.Distance, "unit", geocode.METERS)
 	}
-
-	destination := geocode.AddressQuery{
-		Street:     "1045 La Avenida St",
-		City:       "Mountain View",
-		PostalCode: "94043",
-		State:      "CA",
-		Country:    "US",
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	routeLegs, err := client.GetRouteForAddress(ctx, &origin, &destination)
-	require.Equal(t, 1, len(routeLegs))
-	t.Logf("testGetRouteForAddress - routeLegs: %v", routeLegs)
-	require.NoError(t, err)
-}
-
-func testGeocodeAddress(t *testing.T, client geocode.GeoCoder) {
-	address := geocode.AddressQuery{
-		Street:     "1600 Amphitheatre Pkwy",
-		City:       "Mountain View",
-		PostalCode: "94043",
-		State:      "CA",
-		Country:    "US",
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	pt, err := client.GeocodeAddress(ctx, &address)
-	require.NoError(t, err)
-	assert.Equal(t, pt.FormattedAddress, "Google Building 40, 1600 Amphitheatre Pkwy, Mountain View, CA 94043, USA", "returned address should match")
-	t.Logf("geo located to %v", pt)
-
-	address = geocode.AddressQuery{
-		Street:     "1045 La Avenida St",
-		City:       "Mountain View",
-		PostalCode: "94043",
-		State:      "CA",
-		Country:    "US",
-	}
-	pt, err = client.GeocodeAddress(ctx, &address)
-	require.NoError(t, err)
-	assert.Equal(t, pt.FormattedAddress, "1045 La Avenida St, Mountain View, CA 94043, USA", "returned address should match")
-	t.Logf("geo located to %v", pt)
-
-	address = geocode.AddressQuery{
-		Street:     "2001 Market St",
-		City:       "San Francisco",
-		PostalCode: "94114",
-		State:      "CA",
-		Country:    "US",
-	}
-	pt, err = client.GeocodeAddress(ctx, &address)
-	require.NoError(t, err)
-	assert.Equal(t, pt.FormattedAddress, "2001 Market St, San Francisco, CA 94114, USA", "returned address should match")
-	t.Logf("geo located to %v", pt)
-
-	address = geocode.AddressQuery{
-		Street:     "2 Maxwell Ct",
-		City:       "San Francisco",
-		PostalCode: "94103",
-		State:      "CA",
-		Country:    "US",
-	}
-	pt, err = client.GeocodeAddress(ctx, &address)
-	require.NoError(t, err)
-	assert.Equal(t, pt.FormattedAddress, "2 Maxwell Ct, San Francisco, CA 94103, USA", "returned address should match")
-	t.Logf("geo located to %v", pt)
-
-	address = geocode.AddressQuery{
-		PostalCode: "94952",
-		Country:    "US",
-	}
-	pt, err = client.GeocodeAddress(ctx, &address)
-	require.NoError(t, err)
-	assert.Equal(t, pt.FormattedAddress, "Petaluma, CA 94952, USA", "returned address should match")
-	t.Logf("geo located to %v", pt)
-}
-
-func testDistance(t *testing.T, client geocode.GeoCoder) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	pt1, err := client.GeocodeAddress(ctx, &geocode.AddressQuery{
-		Street:     "2001 Market St",
-		City:       "San Francisco",
-		PostalCode: "94114",
-		State:      "CA",
-		Country:    "USA",
-	})
-	require.NoError(t, err)
-
-	pt2, err := client.GeocodeAddress(ctx, &geocode.AddressQuery{
-		Street:     "2 Maxwell Ct",
-		City:       "San Francisco",
-		PostalCode: "94103",
-		State:      "CA",
-		Country:    "USA",
-	})
-	require.NoError(t, err)
-	u := geocode.KM
-	d, err := client.GetDistance(ctx, u, pt1, pt2)
-	require.NoError(t, err)
-	fmt.Printf("%v is %0.2f %s from %v", pt1, d, u, pt2)
-
-	u = geocode.METERS
-	d, err = client.GetDistance(ctx, u, pt1, pt2)
-	require.NoError(t, err)
-	fmt.Printf("%v is %0.2f %s from %v", pt1, d, u, pt2)
-
-	u = geocode.MILES
-	d, err = client.GetDistance(ctx, u, pt1, pt2)
-	require.NoError(t, err)
-	fmt.Printf("%v is %0.2f %s from %v", pt1, d, u, pt2)
-
-	u = geocode.FEET
-	d, err = client.GetDistance(ctx, u, pt1, pt2)
-	require.NoError(t, err)
-	fmt.Printf("%v is %0.2f %s from %v", pt1, d, u, pt2)
 }

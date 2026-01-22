@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"gitlab.com/xerra/common/vincenty"
-	"go.uber.org/zap"
 	"googlemaps.github.io/maps"
 
 	"github.com/comfforts/errors"
@@ -25,7 +24,6 @@ type GeoCoder interface {
 
 type Config struct {
 	GeocoderKey string `json:"geocoder_key"`
-	logger.AppLogger
 }
 
 type geoCodeService struct {
@@ -33,14 +31,19 @@ type geoCodeService struct {
 	client *maps.Client
 }
 
-func NewGeoCodeService(cfg Config) (*geoCodeService, error) {
-	if cfg.GeocoderKey == "" || cfg.AppLogger == nil {
+func NewGeoCodeService(ctx context.Context, cfg Config) (*geoCodeService, error) {
+	l, err := logger.LoggerFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("NewGeoCodeService - error getting logger from context: %w", err)
+	}
+
+	if cfg.GeocoderKey == "" {
 		return nil, errors.NewAppError(errors.ERROR_MISSING_REQUIRED)
 	}
 
 	c, err := maps.NewClient(maps.WithAPIKey(cfg.GeocoderKey))
 	if err != nil {
-		cfg.Error("error initializing google maps client")
+		l.Error("error initializing google maps client", "error", err.Error())
 		return nil, err
 	}
 
@@ -53,9 +56,9 @@ func NewGeoCodeService(cfg Config) (*geoCodeService, error) {
 }
 
 func (g *geoCodeService) Geocode(ctx context.Context, postalCode, countryCode string) (*Point, error) {
-	if ctx == nil {
-		g.Error("context is nil", zap.Error(ErrNilContext))
-		return nil, ErrNilContext
+	l, err := logger.LoggerFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("Geocode - error getting logger from context: %w", err)
 	}
 
 	if countryCode == "" {
@@ -70,12 +73,12 @@ func (g *geoCodeService) Geocode(ctx context.Context, postalCode, countryCode st
 	}
 	resp, err := g.client.Geocode(ctx, req)
 	if err != nil {
-		g.Error(ERROR_GEOCODING_POSTAL, zap.Error(err))
+		l.Error(ERROR_GEOCODING_POSTAL, "error", err.Error())
 		return nil, ErrGeoCodePostalCode
 	}
 
 	if len(resp) < 1 {
-		g.Error(NO_RESULTS)
+		l.Error(NO_RESULTS)
 		return nil, ErrGeoCodeNoResults
 	}
 
@@ -104,9 +107,14 @@ func (g *geoCodeService) GetRouteForAddress(ctx context.Context, origin, destina
 }
 
 func (g *geoCodeService) getRoute(ctx context.Context, req *maps.DirectionsRequest) ([]*RouteLeg, error) {
-	routes, _, err := g.client.Directions(context.Background(), req)
+	l, err := logger.LoggerFromContext(ctx)
 	if err != nil {
-		g.Error("error getting route", zap.Error(err))
+		return nil, fmt.Errorf("getRoute - error getting logger from context: %w", err)
+	}
+
+	routes, _, err := g.client.Directions(ctx, req)
+	if err != nil {
+		l.Error("error getting route", "error", err.Error())
 		return nil, err
 	}
 
@@ -159,9 +167,14 @@ func (g *geoCodeService) GetRouteMatrixForLatLong(ctx context.Context, origins, 
 }
 
 func (g *geoCodeService) getRouteMatrix(ctx context.Context, req *maps.DistanceMatrixRequest) ([]*RouteLeg, error) {
+	l, err := logger.LoggerFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getRouteMatrix - error getting logger from context: %w", err)
+	}
+
 	resp, err := g.client.DistanceMatrix(ctx, req)
 	if err != nil {
-		g.Error("error getting route matrix", zap.Error(err))
+		l.Error("error getting route matrix", "error", err.Error())
 		return nil, err
 	}
 
@@ -183,9 +196,9 @@ func (g *geoCodeService) getRouteMatrix(ctx context.Context, req *maps.DistanceM
 }
 
 func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr *AddressQuery) (*Point, error) {
-	if ctx == nil {
-		g.Error("context is nil", zap.Error(ErrNilContext))
-		return nil, ErrNilContext
+	l, err := logger.LoggerFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("GeocodeAddress - error getting logger from context: %w", err)
 	}
 
 	if addr.Country == "" {
@@ -198,12 +211,12 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr *AddressQuery)
 
 	resp, err := g.client.Geocode(ctx, req)
 	if err != nil {
-		g.Error(ERROR_GEOCODING_ADDRESS, zap.Error(err))
+		l.Error(ERROR_GEOCODING_ADDRESS, "error", err.Error())
 		return nil, ErrGeoCodeAddress
 	}
 
 	if len(resp) < 1 {
-		g.Error(NO_RESULTS)
+		l.Error(NO_RESULTS)
 		return nil, ErrGeoCodeNoResults
 	}
 
@@ -218,9 +231,9 @@ func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr *AddressQuery)
 }
 
 func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, hint string) (*Point, error) {
-	if ctx == nil {
-		g.Error("context is nil", zap.Error(ErrNilContext))
-		return nil, ErrNilContext
+	l, err := logger.LoggerFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("GeocodeLatLong - error getting logger from context: %w", err)
 	}
 
 	req := &maps.GeocodingRequest{
@@ -231,12 +244,12 @@ func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, 
 	}
 	resp, err := g.client.Geocode(ctx, req)
 	if err != nil {
-		g.Error(ERROR_GEOCODING_ADDRESS, zap.Error(err))
+		l.Error(ERROR_GEOCODING_ADDRESS, "error", err.Error())
 		return nil, ErrGeoCodeAddress
 	}
 
 	if len(resp) < 1 {
-		g.Error(NO_RESULTS)
+		l.Error(NO_RESULTS)
 		return nil, ErrGeoCodeNoResults
 	}
 

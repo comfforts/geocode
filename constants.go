@@ -1,9 +1,8 @@
 package geocode
 
 import (
+	"errors"
 	"time"
-
-	"github.com/comfforts/errors"
 )
 
 const (
@@ -27,10 +26,10 @@ const (
 )
 
 var (
-	ErrNilContext        = errors.NewAppError("context is nil")
-	ErrGeoCodePostalCode = errors.NewAppError(ERROR_GEOCODING_POSTAL)
-	ErrGeoCodeAddress    = errors.NewAppError(ERROR_GEOCODING_ADDRESS)
-	ErrGeoCodeNoResults  = errors.NewAppError(NO_RESULTS)
-	ErrInvalidGeoLatLng  = errors.NewAppError(ERR_INVALID_LAT_LNG)
-	ErrInvalidGeoUnit    = errors.NewAppError(ERR_INVALID_UNIT)
+	ErrNilContext        = errors.New("context is nil")
+	ErrGeoCodePostalCode = errors.New(ERROR_GEOCODING_POSTAL)
+	ErrGeoCodeAddress    = errors.New(ERROR_GEOCODING_ADDRESS)
+	ErrGeoCodeNoResults  = errors.New(NO_RESULTS)
+	ErrInvalidGeoLatLng  = errors.New(ERR_INVALID_LAT_LNG)
+	ErrInvalidGeoUnit    = errors.New(ERR_INVALID_UNIT)
 )
