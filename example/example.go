@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/comfforts/geocode"
@@ -33,8 +32,7 @@ func main() {
 func testGeocoding(ctx context.Context, gsc geocode.GeoCoder) {
 	l, err := logger.LoggerFromContext(ctx)
 	if err != nil {
-		fmt.Printf("NewGeoCodeService - error getting logger from context: %w", err)
-		return
+		l = logger.GetSlogLogger()
 	}
 
 	ctx, cancel := context.WithCancel(ctx)

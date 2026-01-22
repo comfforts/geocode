@@ -38,7 +38,7 @@ type geoCodeService struct {
 func NewGeoCodeService(ctx context.Context, cfg Config) (*geoCodeService, error) {
 	l, err := logger.LoggerFromContext(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("NewGeoCodeService - error getting logger from context: %w", err)
+		l = logger.GetSlogLogger()
 	}
 
 	if cfg.GeocoderKey == "" {
@@ -62,7 +62,7 @@ func NewGeoCodeService(ctx context.Context, cfg Config) (*geoCodeService, error)
 func (g *geoCodeService) Geocode(ctx context.Context, postalCode, countryCode string) (*Point, error) {
 	l, err := logger.LoggerFromContext(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("Geocode - error getting logger from context: %w", err)
+		l = logger.GetSlogLogger()
 	}
 
 	if countryCode == "" {
@@ -79,6 +79,74 @@ func (g *geoCodeService) Geocode(ctx context.Context, postalCode, countryCode st
 	if err != nil {
 		l.Error(ERROR_GEOCODING_POSTAL, "error", err.Error())
 		return nil, ErrGeoCodePostalCode
+	}
+
+	if len(resp) < 1 {
+		l.Error(NO_RESULTS)
+		return nil, ErrGeoCodeNoResults
+	}
+
+	r := resp[0]
+	pt := &Point{
+		Latitude:         r.Geometry.Location.Lat,
+		Longitude:        r.Geometry.Location.Lng,
+		FormattedAddress: r.FormattedAddress,
+	}
+
+	return pt, nil
+}
+
+func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr *AddressQuery) (*Point, error) {
+	l, err := logger.LoggerFromContext(ctx)
+	if err != nil {
+		l = logger.GetSlogLogger()
+	}
+
+	if addr.Country == "" {
+		addr.Country = "USA"
+	}
+
+	req := &maps.GeocodingRequest{
+		Address: addr.addressString(),
+	}
+
+	resp, err := g.client.Geocode(ctx, req)
+	if err != nil {
+		l.Error(ERROR_GEOCODING_ADDRESS, "error", err.Error())
+		return nil, ErrGeoCodeAddress
+	}
+
+	if len(resp) < 1 {
+		l.Error(NO_RESULTS)
+		return nil, ErrGeoCodeNoResults
+	}
+
+	r := resp[0]
+	pt := &Point{
+		Latitude:         r.Geometry.Location.Lat,
+		Longitude:        r.Geometry.Location.Lng,
+		FormattedAddress: r.FormattedAddress,
+	}
+
+	return pt, nil
+}
+
+func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, hint string) (*Point, error) {
+	l, err := logger.LoggerFromContext(ctx)
+	if err != nil {
+		l = logger.GetSlogLogger()
+	}
+
+	req := &maps.GeocodingRequest{
+		LatLng: &maps.LatLng{
+			Lat: lat,
+			Lng: long,
+		},
+	}
+	resp, err := g.client.Geocode(ctx, req)
+	if err != nil {
+		l.Error(ERROR_GEOCODING_ADDRESS, "error", err.Error())
+		return nil, ErrGeoCodeAddress
 	}
 
 	if len(resp) < 1 {
@@ -113,7 +181,7 @@ func (g *geoCodeService) GetRouteForAddress(ctx context.Context, origin, destina
 func (g *geoCodeService) getRoute(ctx context.Context, req *maps.DirectionsRequest) ([]*RouteLeg, error) {
 	l, err := logger.LoggerFromContext(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("getRoute - error getting logger from context: %w", err)
+		l = logger.GetSlogLogger()
 	}
 
 	routes, _, err := g.client.Directions(ctx, req)
@@ -173,7 +241,7 @@ func (g *geoCodeService) GetRouteMatrixForLatLong(ctx context.Context, origins, 
 func (g *geoCodeService) getRouteMatrix(ctx context.Context, req *maps.DistanceMatrixRequest) ([]*RouteLeg, error) {
 	l, err := logger.LoggerFromContext(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("getRouteMatrix - error getting logger from context: %w", err)
+		l = logger.GetSlogLogger()
 	}
 
 	resp, err := g.client.DistanceMatrix(ctx, req)
@@ -197,74 +265,6 @@ func (g *geoCodeService) getRouteMatrix(ctx context.Context, req *maps.DistanceM
 	}
 
 	return routeLegs, nil
-}
-
-func (g *geoCodeService) GeocodeAddress(ctx context.Context, addr *AddressQuery) (*Point, error) {
-	l, err := logger.LoggerFromContext(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("GeocodeAddress - error getting logger from context: %w", err)
-	}
-
-	if addr.Country == "" {
-		addr.Country = "USA"
-	}
-
-	req := &maps.GeocodingRequest{
-		Address: addr.addressString(),
-	}
-
-	resp, err := g.client.Geocode(ctx, req)
-	if err != nil {
-		l.Error(ERROR_GEOCODING_ADDRESS, "error", err.Error())
-		return nil, ErrGeoCodeAddress
-	}
-
-	if len(resp) < 1 {
-		l.Error(NO_RESULTS)
-		return nil, ErrGeoCodeNoResults
-	}
-
-	r := resp[0]
-	pt := &Point{
-		Latitude:         r.Geometry.Location.Lat,
-		Longitude:        r.Geometry.Location.Lng,
-		FormattedAddress: r.FormattedAddress,
-	}
-
-	return pt, nil
-}
-
-func (g *geoCodeService) GeocodeLatLong(ctx context.Context, lat, long float64, hint string) (*Point, error) {
-	l, err := logger.LoggerFromContext(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("GeocodeLatLong - error getting logger from context: %w", err)
-	}
-
-	req := &maps.GeocodingRequest{
-		LatLng: &maps.LatLng{
-			Lat: lat,
-			Lng: long,
-		},
-	}
-	resp, err := g.client.Geocode(ctx, req)
-	if err != nil {
-		l.Error(ERROR_GEOCODING_ADDRESS, "error", err.Error())
-		return nil, ErrGeoCodeAddress
-	}
-
-	if len(resp) < 1 {
-		l.Error(NO_RESULTS)
-		return nil, ErrGeoCodeNoResults
-	}
-
-	r := resp[0]
-	pt := &Point{
-		Latitude:         r.Geometry.Location.Lat,
-		Longitude:        r.Geometry.Location.Lng,
-		FormattedAddress: r.FormattedAddress,
-	}
-
-	return pt, nil
 }
 
 func (g *geoCodeService) GetDistance(ctx context.Context, u DistanceUnit, source, dest *Point) (float64, error) {

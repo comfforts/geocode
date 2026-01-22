@@ -155,6 +155,33 @@ func testGeocodeAddress(t *testing.T, client geocode.GeoCoder, l *slog.Logger) {
 	require.NoError(t, err)
 	assert.Equal(t, pt.FormattedAddress, "Petaluma, CA 94952, USA", "returned address should match")
 	l.Debug("address geo located to", "pt", pt)
+
+	address = geocode.AddressQuery{
+		City:    "New Delhi",
+		Country: "IND",
+	}
+	pt, err = client.GeocodeAddress(ctx, &address)
+	require.NoError(t, err)
+	assert.Equal(t, pt.FormattedAddress, "New Delhi, Delhi, India", "returned address should match")
+	l.Debug("address geo located to", "pt", pt)
+
+	address = geocode.AddressQuery{
+		City:    "Toronto",
+		Country: "CAN",
+	}
+	pt, err = client.GeocodeAddress(ctx, &address)
+	require.NoError(t, err)
+	assert.Equal(t, pt.FormattedAddress, "Toronto, ON, Canada", "returned address should match")
+	l.Debug("address geo located to", "pt", pt)
+
+	address = geocode.AddressQuery{
+		City:    "Buenos Aires",
+		Country: "ARG",
+	}
+	pt, err = client.GeocodeAddress(ctx, &address)
+	require.NoError(t, err)
+	assert.Equal(t, pt.FormattedAddress, "Buenos Aires, Argentina", "returned address should match")
+	l.Debug("address geo located to", "pt", pt)
 }
 
 func testGeocodeLatLong(t *testing.T, client geocode.GeoCoder, l *slog.Logger) {
