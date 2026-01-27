@@ -74,10 +74,10 @@ type RangeBounds struct {
 }
 
 type RouteLeg struct {
-	Start    string
-	End      string
-	Duration time.Duration
-	Distance int
+	Start    Point
+	End      Point
+	Duration time.Duration `json:"duration"`
+	Distance int           `json:"distance"`
 }
 
 type AddressQuery struct {

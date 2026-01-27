@@ -194,8 +194,16 @@ func (g *geoCodeService) getRoute(ctx context.Context, req *maps.DirectionsReque
 	for _, rt := range routes {
 		for _, l := range rt.Legs {
 			routeLegs = append(routeLegs, &RouteLeg{
-				Start:    l.StartAddress,
-				End:      l.EndAddress,
+				Start: Point{
+					Latitude:         l.StartLocation.Lat,
+					Longitude:        l.StartLocation.Lng,
+					FormattedAddress: l.StartAddress,
+				},
+				End: Point{
+					Latitude:         l.EndLocation.Lat,
+					Longitude:        l.EndLocation.Lng,
+					FormattedAddress: l.EndAddress,
+				},
 				Duration: l.Duration,
 				Distance: l.Distance.Meters,
 			})
@@ -255,8 +263,12 @@ func (g *geoCodeService) getRouteMatrix(ctx context.Context, req *maps.DistanceM
 		for j, elem := range row.Elements {
 			if resp.OriginAddresses[i] != resp.DestinationAddresses[j] {
 				routeLegs = append(routeLegs, &RouteLeg{
-					Start:    resp.OriginAddresses[i],
-					End:      resp.DestinationAddresses[j],
+					Start: Point{
+						FormattedAddress: resp.OriginAddresses[i],
+					},
+					End: Point{
+						FormattedAddress: resp.DestinationAddresses[j],
+					},
 					Duration: elem.Duration,
 					Distance: elem.Distance.Meters,
 				})
