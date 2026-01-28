@@ -258,10 +258,19 @@ func (g *geoCodeService) getRouteMatrix(ctx context.Context, req *maps.DistanceM
 		return nil, err
 	}
 
+	addrMap := map[string]*Point{}
+
 	routeLegs := []*RouteLeg{}
 	for i, row := range resp.Rows {
 		for j, elem := range row.Elements {
 			if resp.OriginAddresses[i] != resp.DestinationAddresses[j] {
+				if _, ok := addrMap[resp.OriginAddresses[i]]; !ok {
+					addrMap[resp.OriginAddresses[i]] = nil
+				}
+				if _, ok := addrMap[resp.DestinationAddresses[j]]; !ok {
+					addrMap[resp.DestinationAddresses[j]] = nil
+				}
+
 				routeLegs = append(routeLegs, &RouteLeg{
 					Start: Point{
 						FormattedAddress: resp.OriginAddresses[i],
@@ -273,6 +282,40 @@ func (g *geoCodeService) getRouteMatrix(ctx context.Context, req *maps.DistanceM
 					Distance: elem.Distance.Meters,
 				})
 			}
+		}
+	}
+
+	for k := range addrMap {
+		req := &maps.GeocodingRequest{
+			Address: k,
+		}
+
+		if resp, err := g.client.Geocode(ctx, req); err != nil {
+			l.Error(ERROR_GEOCODING_ADDRESS, "error", err.Error())
+			continue
+		} else {
+			if len(resp) < 1 {
+				l.Error(NO_RESULTS)
+				continue
+			}
+			r := resp[0]
+			pt := &Point{
+				Latitude:         r.Geometry.Location.Lat,
+				Longitude:        r.Geometry.Location.Lng,
+				FormattedAddress: r.FormattedAddress,
+			}
+			addrMap[k] = pt
+		}
+	}
+
+	for _, rl := range routeLegs {
+		if startPt, ok := addrMap[rl.Start.FormattedAddress]; ok && startPt != nil {
+			rl.Start.Latitude = startPt.Latitude
+			rl.Start.Longitude = startPt.Longitude
+		}
+		if endPt, ok := addrMap[rl.End.FormattedAddress]; ok && endPt != nil {
+			rl.End.Latitude = endPt.Latitude
+			rl.End.Longitude = endPt.Longitude
 		}
 	}
 

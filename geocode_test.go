@@ -34,6 +34,7 @@ func TestGeocoder(t *testing.T) {
 		"gecoding intl lat/lng succeeds":               testIntlLatLong,
 		"test distance, succeeds":                      testDistance,
 		"test get route for address, succeeds":         testGetRouteForAddress,
+		"test get route for addresses, succeeds":       testGetRouteForAddresses,
 		"test get route matrix for lat/long, succeeds": testGetRouteMatrixForLatLong,
 		"test get route for lat/long, succeeds":        testGetRouteForLatLong,
 	} {
@@ -276,6 +277,54 @@ func testGetRouteForAddress(t *testing.T, client geocode.GeoCoder, l *slog.Logge
 	routeLegs, err := client.GetRouteForAddress(ctx, &origin, &destination)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(routeLegs))
+	for _, rl := range routeLegs {
+		l.Debug("route leg", "start", rl.Start, "end", rl.End, "duration", rl.Duration, "distance", rl.Distance, "unit", geocode.METERS)
+	}
+}
+
+func testGetRouteForAddresses(t *testing.T, client geocode.GeoCoder, l *slog.Logger) {
+	origins := []*geocode.AddressQuery{
+		{
+			Street:     "1600 Amphitheatre Pkwy",
+			City:       "Mountain View",
+			PostalCode: "94043",
+			State:      "CA",
+			Country:    "USA",
+		},
+	}
+	dests := []*geocode.AddressQuery{
+		{
+			Street:     "1045 La Avenida St",
+			City:       "Mountain View",
+			PostalCode: "94043",
+			State:      "CA",
+			Country:    "US",
+		},
+	}
+
+	origins = append(origins, &geocode.AddressQuery{
+		Street:     "1045 La Avenida St",
+		City:       "Mountain View",
+		PostalCode: "94043",
+		State:      "CA",
+		Country:    "US",
+	})
+
+	dests = append(dests, &geocode.AddressQuery{
+		Street:     "2001 Market St",
+		City:       "San Francisco",
+		PostalCode: "94114",
+		State:      "CA",
+		Country:    "USA",
+	})
+
+	ctx := logger.WithLogger(context.Background(), l)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	routeLegs, err := client.GetRouteMatrixForAddress(ctx, origins, dests)
+	require.NoError(t, err)
+	// require.Equal(t, 1, len(routeLegs))
 	for _, rl := range routeLegs {
 		l.Debug("route leg", "start", rl.Start, "end", rl.End, "duration", rl.Duration, "distance", rl.Distance, "unit", geocode.METERS)
 	}
