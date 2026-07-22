@@ -47,6 +47,62 @@ func TestGeocoder(t *testing.T) {
 	}
 }
 
+func TestGeocoder_GetAddressRoute(t *testing.T) {
+	testCfg := getTestConfig()
+	l := logger.GetSlogMultiLogger(testCfg.dir)
+	ctx := logger.WithLogger(context.Background(), l)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	gscCfg := geocode.Config{
+		GeocoderKey: testCfg.key,
+	}
+	gsc, err := geocode.NewGeoCodeService(ctx, gscCfg)
+	require.NoError(t, err)
+
+	origins := []*geocode.AddressQuery{
+		{
+			Street:     "2 Turquoise Ct",
+			City:       "Petaluma",
+			State:      "CA",
+			PostalCode: "94952",
+			Country:    "USA",
+		},
+	}
+	dests := []*geocode.AddressQuery{
+		{
+			Street:     "212 2nd St",
+			City:       "Petaluma",
+			State:      "CA",
+			PostalCode: "94952",
+			Country:    "USA",
+		},
+	}
+
+	origins = append(origins, &geocode.AddressQuery{
+		Street:     "212 2nd St",
+		City:       "Petaluma",
+		State:      "CA",
+		PostalCode: "94952",
+		Country:    "USA",
+	})
+
+	dests = append(dests, &geocode.AddressQuery{
+		Street:     "21 4th St",
+		City:       "Petaluma",
+		State:      "CA",
+		PostalCode: "94952",
+		Country:    "USA",
+	})
+
+	routeLegs, err := gsc.GetRouteMatrixForAddress(ctx, origins, dests)
+	require.NoError(t, err)
+	for _, rl := range routeLegs {
+		l.Debug("route leg", "start", rl.Start, "end", rl.End, "duration", rl.Duration, "distance", rl.Distance, "unit", geocode.METERS)
+	}
+
+}
+
 func getTestConfig() testConfig {
 	dataDir := os.Getenv("DATA_DIR")
 	credsPath := os.Getenv("CREDS_PATH")
